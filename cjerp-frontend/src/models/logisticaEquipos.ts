@@ -184,6 +184,9 @@ export type SolicitudDisponible = {
   nombreProyecto?: string | null;
   mismoSite: boolean;
   stockDisponible: number;
+  utilizado: number;
+  idEstado?: number | null;
+  nomEstado?: string | null;
 };
 
 /** Material consumible (cod. 30) con stock disponible, sin línea de origen. */

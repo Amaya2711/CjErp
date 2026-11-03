@@ -14,6 +14,15 @@ export type VacacionesRechazarRequest = {
   fechaFin: string;
 };
 
+export type VacacionesModificarFechasRequest = {
+  idEmpleadoCj: number;
+  /** Rango actual de la solicitud (identifica el registro). */
+  fechaInicio: string;
+  fechaFin: string;
+  nuevaFechaInicio: string;
+  nuevaFechaFin: string;
+};
+
 export type VacacionesAprobarRequest = {
   idEmpleadoCj: number;
   fechaInicio: string;
@@ -169,6 +178,14 @@ export async function crearVacacion(payload: VacacionesGuardarRequest) {
 export async function rechazarVacacion(payload: VacacionesRechazarRequest) {
   return await httpClient.post<{ success: boolean; message?: string; data?: unknown }>(
     "/admin/vacaciones/rechazar",
+    payload
+  );
+}
+
+/** Cambia las fechas de una solicitud aún no aprobada al 100 % (estados 97/98/99). */
+export async function modificarFechasVacacion(payload: VacacionesModificarFechasRequest) {
+  return await httpClient.post<{ success: boolean; message?: string; data?: unknown }>(
+    "/admin/vacaciones/modificar-fechas",
     payload
   );
 }

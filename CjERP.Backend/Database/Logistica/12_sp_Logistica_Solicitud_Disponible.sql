@@ -44,19 +44,25 @@ BEGIN
                         AND d.IdCliente = ISNULL(@IdCliente, d.IdCliente)
                         AND d.IdProyecto = ISNULL(@IdProyecto, d.IdProyecto)
                    THEN 1 ELSE 0 END AS bit)                  AS MismoSite,
-         CAST(ISNULL(ms.Disponible, 0) AS decimal(18,4))      AS StockDisponible
+         CAST(ISNULL(ms.Disponible, 0) AS decimal(18,4))      AS StockDisponible,
+         -- Como el Listado antiguo: Utilizado = Stock - Disponible (global por material).
+         CAST(ISNULL(ms.Stock, 0) - ISNULL(ms.Disponible, 0) AS decimal(18,4)) AS Utilizado,
+         d.IdEstado,
+         e.ValorIni                                           AS NomEstado
   FROM dbo.DetLogistica d
   LEFT JOIN dbo.Material m       ON m.CodPap = d.CodPap
   LEFT JOIN dbo.Site s           ON s.IdSite = d.IdSite AND s.Correlativo = d.CorreSite
   LEFT JOIN dbo.Cliente cl       ON cl.IdCliente = d.IdCliente
   LEFT JOIN dbo.Proyecto pr      ON pr.IdProyecto = d.IdProyecto
   LEFT JOIN dbo.MaterialStock ms ON ms.CodPap = d.CodPap
+  LEFT JOIN dbo.Constante e      ON e.Campo = 'ESTADO_LOG' AND e.Correlativo = d.IdEstado
   OUTER APPLY (SELECT SUM(ds.CantSap) AS Reservado
                FROM dbo.DetSolicitud ds
                WHERE ds.Correlativo = CONVERT(varchar(36), d.Correlativo)
                  AND ds.IdDespacho = 1 AND ds.IdEstado NOT IN (6, 19)) r
   WHERE (d.IdEstado = 2 OR (@Texto IS NULL AND d.IdEstado = 3))
-    AND d.CantSap - ISNULL(r.Reservado, 0) > 0
+    -- Modo SITIO muestra tambien las lineas sin saldo (como el sistema antiguo); modo TEXTO solo con saldo.
+    AND (@Texto IS NULL OR d.CantSap - ISNULL(r.Reservado, 0) > 0)
     AND (@Texto IS NULL
          OR CAST(d.CodPap AS nvarchar(50)) LIKE @Texto + N'%'
          OR m.NombreMaterial LIKE N'%' + @Texto + N'%')

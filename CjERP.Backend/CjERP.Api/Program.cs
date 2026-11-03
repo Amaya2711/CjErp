@@ -246,7 +246,12 @@ builder.Services.AddScoped<ISegRolMenuPermisoService, SegRolMenuPermisoService>(
 builder.Services.AddScoped<ISegPermisoAccionService, SegPermisoAccionService>();
 builder.Services.AddScoped<ILookupService, LookupService>();
 builder.Services.AddScoped<IInicioIndicadoresService, InicioIndicadoresService>();
-builder.Services.AddHostedService<SqlMonitorWorker>();
+// El monitor SQL solo corre en productivo: un backend local (Development) contra la base de produccion duplicaba las capturas
+// (Monitor_TopSql, WaitStats...) y su escritura al log. La pantalla del monitor sigue funcionando en cualquier entorno (solo lee).
+if (!builder.Environment.IsDevelopment())
+{
+    builder.Services.AddHostedService<SqlMonitorWorker>();
+}
 builder.Services.AddScoped<IEmpleadoCtaService, EmpleadoCtaService>();
 builder.Services.AddScoped<IEmpleadoResponsableService, EmpleadoResponsableService>();
 builder.Services.AddScoped<IChequeEmpleadoService, ChequeEmpleadoService>();
@@ -339,6 +344,9 @@ builder.Services.AddScoped<IIaAuditService, IaAuditService>();
 // implementacion registrada de IIaChatService. IaChatService ya no implementa la interfaz (quedo
 // reducido a una clase estatica de constantes compartidas, ver IaChatService.cs).
 builder.Services.AddScoped<IIaChatService, IaOrchestrator>();
+// CJ Intelligence (/api/ai/*): solo se registra si CjIntelligence:Enabled=true, existe ConnectionStrings:CjIntelligence (usuario cj_ia)
+// y CjIntelligence:LoginReuseControlResolved=true. Sin esa configuracion no registra nada y el chat anterior no cambia.
+builder.Services.AddCjIntelligence(builder.Configuration);
 // Fase 2 (docs/AI_COPILOT_IMPLEMENTATION_PLAN.md): autorizacion real del IA Chat. REGISTRADA PERO INACTIVA:
 // IaOrchestrator solo la usa si recibe IaScopeEnforcementOptions con Enabled = true, y esa opcion NO esta
 // registrada ni enlazada a configuracion, asi que el flujo sigue por la ruta antigua sin alcance.

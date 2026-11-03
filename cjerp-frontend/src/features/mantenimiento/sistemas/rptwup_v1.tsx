@@ -185,7 +185,13 @@ export default function RptWupV1Page() {
   const [busy, setBusy] = useState<"" | "config" | "seleccion" | "envio">("");
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [generandoPdf, setGenerandoPdf] = useState(false);
-  const [tab, setTab] = useState<"empleados" | "envios">("empleados");
+  const [tab, setTab] = useState<"empleados" | "envios" | "consulta">("empleados");
+  const hoyConsulta = new Date();
+  const [consultaEmpleado, setConsultaEmpleado] = useState("");
+  const [consultaMes, setConsultaMes] = useState(hoyConsulta.getMonth() + 1);
+  const [consultaAnio, setConsultaAnio] = useState(hoyConsulta.getFullYear());
+  const [consultaPdfUrl, setConsultaPdfUrl] = useState("");
+  const [consultando, setConsultando] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const configDirtyRef = useRef(false);
@@ -325,6 +331,32 @@ export default function RptWupV1Page() {
   };
 
   // PDF que se enviaría por Meta (primer empleado con asistencia en el período), sin enviar ni registrar nada.
+  // PDF de asistencia de un empleado para un mes/año (se muestra dentro de la pestaña; no envía nada).
+  const consultarPdfEmpleado = async () => {
+    if (!consultaEmpleado) {
+      setError("Seleccione un empleado.");
+      return;
+    }
+    setConsultando(true);
+    setError("");
+    try {
+      const blob = await reportesWhatsappService.vistaPreviaPdf(TIPO, Number(consultaEmpleado), consultaAnio, consultaMes);
+      if (!(blob instanceof Blob) || blob.size === 0) {
+        throw new Error("El PDF no contiene datos.");
+      }
+      setConsultaPdfUrl((anterior) => {
+        if (anterior) URL.revokeObjectURL(anterior);
+        return URL.createObjectURL(blob);
+      });
+    } catch (err) {
+      setError(await getBlobHttpErrorMessage(err, "No se pudo generar el PDF del empleado."));
+    } finally {
+      setConsultando(false);
+    }
+  };
+
+  useEffect(() => () => { if (consultaPdfUrl) URL.revokeObjectURL(consultaPdfUrl); }, [consultaPdfUrl]);
+
   const verPdfEjemplo = async () => {
     // La pestaña se abre antes de la espera para que el navegador no la bloquee como ventana emergente.
     const ventana = window.open("", "_blank");
@@ -497,6 +529,9 @@ export default function RptWupV1Page() {
         <button type="button" style={tab === "envios" ? styles.tabActive : styles.tab} onClick={() => setTab("envios")}>
           Envíos del período ({dashboard?.logs.length ?? 0})
         </button>
+        <button type="button" style={tab === "consulta" ? styles.tabActive : styles.tab} onClick={() => setTab("consulta")}>
+          Consultar PDF
+        </button>
       </div>
 
       {tab === "empleados" ? (
@@ -549,6 +584,38 @@ export default function RptWupV1Page() {
         </p>
       </AppCard>
 
+      ) : tab === "consulta" ? (
+      <AppCard title="Reporte PDF por empleado, mes y año">
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 12 }}>
+          <select style={{ ...styles.input, minWidth: 280 }} value={consultaEmpleado} onChange={(e) => setConsultaEmpleado(e.target.value)}>
+            <option value="">Seleccione empleado...</option>
+            {destinatarios.map((d) => (
+              <option key={d.idEmpleado} value={d.idEmpleado}>{d.nombreEmpleado}</option>
+            ))}
+          </select>
+          <select style={styles.input} value={consultaMes} onChange={(e) => setConsultaMes(Number(e.target.value))}>
+            {["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Setiembre", "Octubre", "Noviembre", "Diciembre"].map((m, i) => (
+              <option key={m} value={i + 1}>{m}</option>
+            ))}
+          </select>
+          <input
+            type="number"
+            style={{ ...styles.input, width: 90 }}
+            min={2000}
+            max={2100}
+            value={consultaAnio}
+            onChange={(e) => setConsultaAnio(Number(e.target.value))}
+          />
+          <button type="button" style={styles.secondaryButton} disabled={consultando} onClick={() => void consultarPdfEmpleado()}>
+            {consultando ? "Generando..." : "Ver PDF"}
+          </button>
+        </div>
+        {consultaPdfUrl ? (
+          <iframe title="Reporte PDF del empleado" src={consultaPdfUrl} style={{ width: "100%", height: "70vh", border: "1px solid #E5E7EB", borderRadius: 6 }} />
+        ) : (
+          <p style={styles.hint}>Elija empleado, mes y año. Si el mes es el actual, el reporte llega hasta hoy.</p>
+        )}
+      </AppCard>
       ) : (
       <AppCard title="Envíos del período">
         <DataGridPro<ReporteWhatsappLog>

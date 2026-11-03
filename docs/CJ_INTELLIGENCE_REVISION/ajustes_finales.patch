@@ -1,0 +1,325 @@
+--- a/LEEME.md
++++ b/LEEME.md
+@@ -1,12 +1,14 @@
+ # Paquete de revisión — CJ Intelligence (ronda 3, cierre)
+ 
+-**Versión:** `cj-intelligence-r3-cierre-2026-11-01-6e81b029120e` · base commit `13f5e639900c` + cambios sin commitear. Nada se ejecutó en JC_Db ni se desplegó.
++**Versión:** `cj-intelligence-r3-cierre-2026-11-01-354de8f63147` · base commit `13f5e639900c` + cambios sin commitear. Nada se ejecutó en JC_Db ni se desplegó.
+ 
+-Contenido de `cj-intelligence-ronda3-cierre.zip` (92 archivos + `MANIFIESTO.md` con SHA-256 de cada uno):
++Contenido de `cj-intelligence-ronda3-cierre.zip` (93 archivos + `MANIFIESTO.md` con SHA-256 de cada uno):
+ scripts SQL 18–24 (con 18a/18b/20b/20c/20d/21b/23b), código backend (contratos, proveedor OpenAI, herramientas, guardián de historial,
+ servicio de chat, acceso a datos, controlador y registro), proyectos de pruebas (Ia, Api, Integration), los 2 archivos del frontend,
+-la solución y los documentos (`CJ_INTELLIGENCE_DISENO`, `CJ_INTELLIGENCE_DECISIONES_PENDIENTES`, `CJ_INTELLIGENCE_IDENTIDAD`, hallazgo del log).
++la solución y los documentos (`CJ_INTELLIGENCE_DISENO`, `CJ_INTELLIGENCE_DECISIONES_PENDIENTES`, `CJ_INTELLIGENCE_IDENTIDAD`, `CJ_INTELLIGENCE_PILOTO_CONTROL_IDENTIDAD`, hallazgo del log).
+ 
+-Reemplaza: `01`–`05_*.patch`, `ronda3_correcciones.patch`, la página de revisión (Artifact) anterior y la versión previa de este ZIP (`…cfbcdc4a6942`).
++**Verificación:** el SHA-256 del ZIP solo se verifica con el archivo ZIP real; la página HTML de revisión permite leer el contenido, no verificar ese hash.
++
++Reemplaza: `01`–`05_*.patch`, `ronda3_correcciones.patch`, la página de revisión (Artifact) anterior y las versiones previas de este ZIP (`…cfbcdc4a6942`, `…6e81b029120e`).
+ 
+ Orden de lectura sugerido: `CJ_INTELLIGENCE_DECISIONES_PENDIENTES.md` (bloqueos) → `CJ_INTELLIGENCE_IDENTIDAD.md` → `CJ_INTELLIGENCE_DISENO.md` →
+
+--- a/MANIFIESTO.md
++++ b/MANIFIESTO.md
+@@ -1,13 +1,17 @@
+ # Manifiesto del paquete de revisión
+ 
+-- **Versión del paquete:** `cj-intelligence-r3-cierre-2026-11-01-6e81b029120e` (huella = SHA-256 de la lista de archivos con sus SHA-256, abajo)
++- **Versión del paquete:** `cj-intelligence-r3-cierre-2026-11-01-354de8f63147` (huella = SHA-256 de la lista de archivos con sus SHA-256, abajo)
+ - **Base:** commit `13f5e639900c` de `Cj-Erp-Web` + cambios **sin commitear** de CJ Intelligence (no se hizo commit, push ni despliegue). Los archivos nuevos no existen en el commit base.
+ - **Estado en JC_Db:** nada ejecutado. 0 objetos de CJ Intelligence, `IA_Conversacion.IdUsuario` sigue `int`, 15 usuarios inactivos (verificado de solo lectura el 2026-11-01).
+-- **Archivos:** 92
++- **Archivos:** 93
+ 
+ ## Reemplaza
+ Este ZIP reemplaza por completo: `01_sql_scripts.patch`, `02_backend_codigo.patch`, `03_pruebas.patch`, `04_frontend_y_solucion.patch`,
+ `05_documentos.patch` (rondas 1–2) y `ronda3_correcciones.patch` (parcial, omitía los archivos nuevos), y la página de revisión (Artifact)
+-publicada en la ronda anterior, **y la versión anterior de este mismo ZIP** (`cj-intelligence-r3-cierre-2026-11-01-cfbcdc4a6942`, SHA-256 `631a84eb…616a3`), que no tenía la huella con documento, `IdIdentidad`, auditoría de identidad ni las pruebas de identidad. Los parches se retiraron de la carpeta; este ZIP es el único material vigente.
++publicada en la ronda anterior, **y las versiones anteriores de este mismo ZIP** (`…cfbcdc4a6942`, SHA-256 `631a84eb…616a3`, y `…6e81b029120e`, SHA-256 `0d99df01642fa49beee500ccc69eb1aae698d8436771c03e3be81e6eda078281`), que no tenían la huella con documento, `IdIdentidad`, auditoría de identidad ni las pruebas de identidad. Los parches se retiraron de la carpeta; este ZIP es el único material vigente.
++
++## Verificación del paquete (distinción importante)
++- El **hash SHA-256 del ZIP solo puede verificarse con el archivo ZIP real** (por ejemplo `Get-FileHash -Algorithm SHA256`).
++- La **página HTML de revisión permite leer el contenido**, pero **no permite verificar el hash del ZIP**, ni garantiza que los bytes mostrados sean idénticos a los de cada archivo (el navegador puede normalizar saltos de línea). Los hashes por archivo del manifiesto se comprueban contra los archivos extraídos del ZIP, no contra la página.
+ 
+ ## Resultados de pruebas (esta versión)
+@@ -38,15 +42,15 @@
+ | `647c95dd56b2c405ecc8f05475ac59a9fadb46766a8cfa2097c64e90e6465a4c` | CjERP.Backend/CjERP.Infrastructure/Services/AI/CjIntelligence/CjIntelligenceTurnLease.cs |
+ | `808ec6d09356fec407443c70fd8b434633add9880164ca6b26975dfddc8eadde` | CjERP.Backend/CjERP.Infrastructure/Services/AI/Providers/OpenAiToolChatProvider.cs |
+-| `6feb948adff6167cc51111d4f5426d9e6db34e5e1b4bf475f3cd2fbe83b7d06d` | CjERP.Backend/Database/IaChat/18_CjIntelligence_Esquema.sql |
++| `c542dc33f6b906f8c2a15e9e9298314b32c8c831599500b6a556887be08945ac` | CjERP.Backend/Database/IaChat/18_CjIntelligence_Esquema.sql |
+ | `ef15344bb1ad0a7c58df520ff7780f5492feb7a915f2e186361545693f43ab6e` | CjERP.Backend/Database/IaChat/18a_CjIntelligence_Snapshot_SoloLectura.sql |
+ | `f687664370e88365b7e3f76a8f9ed6d1db15c1fb6d4e9f71703d4ce3c643bc54` | CjERP.Backend/Database/IaChat/18b_CjIntelligence_Reversion_PreUso.sql |
+-| `b7fc8b67a302efb531a32b58057da9a54cac08d7873619fda234893d3e68809b` | CjERP.Backend/Database/IaChat/19_CjIntelligence_Procedimientos.sql |
++| `551d3ecc5d749fa1646be1a2cd24a60b5cc53db68731815497c28d2c4d5f2874` | CjERP.Backend/Database/IaChat/19_CjIntelligence_Procedimientos.sql |
+ | `7257d0acb41e4b05a572f865946df430aaaefe4ca95d6d4e8bfcd8c637ffcfee` | CjERP.Backend/Database/IaChat/20_CjIntelligence_Usuario_cj_ia.sql |
+ | `37f23d9cc822d3fb25804ea33aaa5166fe55d39a41e76ec4860864a6380e8848` | CjERP.Backend/Database/IaChat/20b_CjIntelligence_Usuario_cj_ia_Reversion.sql |
+ | `3eb35f42e4dc47e2185946436dc930378ac373b48a7e19252c3838063bd64b71` | CjERP.Backend/Database/IaChat/20c_CjIntelligence_Firma_Certificado.sql |
+ | `0eae33ce4ef34ced26cf71736801ad47bb7da966038258198309e0c36456cef8` | CjERP.Backend/Database/IaChat/20d_CjIntelligence_Firma_Certificado_Reversion.sql |
+-| `345bf095d609bd21d905d67ea18784c1b5d42d0b00deccbafa41f53f67df3bb7` | CjERP.Backend/Database/IaChat/21_CjIntelligence_Validacion_SoloLectura.sql |
++| `80ecdc502879620e84942e8c8f4b97a427d2af38a9d4e1e4454fa971b5f46311` | CjERP.Backend/Database/IaChat/21_CjIntelligence_Validacion_SoloLectura.sql |
+ | `dedacec68ea33d3aa7d3d4e1dd5f121f1c2393f9746b44b5f48d891c88fee070` | CjERP.Backend/Database/IaChat/21b_CjIntelligence_Validacion_Firma_SoloLectura.sql |
+-| `286414c709ffc26c5d57d06d7ee01d7a22d55becbd1f7b4daefe1b05b397e0f8` | CjERP.Backend/Database/IaChat/22_CjIntelligence_PruebaFuncional.sql |
++| `e55c6b5d6475451ccb45567d6a8750338fc513f63c120f4b91e637506b8dd34a` | CjERP.Backend/Database/IaChat/22_CjIntelligence_PruebaFuncional.sql |
+ | `c1adf1ff78015a487435ca24f4aff9bce00a68066e78bd68ca5969510e6ea8ea` | CjERP.Backend/Database/IaChat/23_CjIntelligence_Pruebas_cj_ia.sql |
+ | `3c6ec506374cac372b84c6433a889249b06a91341648af05320bee3b0141d0ac` | CjERP.Backend/Database/IaChat/23b_CjIntelligence_Limpieza_PorGuid.sql |
+@@ -111,6 +115,7 @@
+ | `2b8e23bcbd75bd33319d3218c7a9368a488bd725791ba30d1eb6a3bb4bbd2d6e` | cjerp-frontend/src/features/cj-intelligence/CjIntelligencePage.tsx |
+ | `67c1170ffad6da231e5f72b38b0809629879402afdfb91c59dce7c049eb83780` | cjerp-frontend/src/features/cj-intelligence/types.ts |
+-| `fee1fe14fb4d4cb32ddc40f91d9d1a1a1d73612a2401b5a21cee9e588450841e` | docs/CJ_INTELLIGENCE_DECISIONES_PENDIENTES.md |
++| `0ecdd6bace8af18ce480837cbbba07298ddac7003385ef4a5a68c0344686d8d6` | docs/CJ_INTELLIGENCE_DECISIONES_PENDIENTES.md |
+ | `7722d8b176d1afd11aa0d0a11353487bf7c38456e4bb409589bb9293cab2f1d8` | docs/CJ_INTELLIGENCE_DISENO.md |
+-| `ed0e04099dbca607cf78416ccf2c8c7abde7741031bf6833cdd1025ed18e81c9` | docs/CJ_INTELLIGENCE_IDENTIDAD.md |
++| `86a031552aed599d859f69f49541ce26b4ab56f0d32f4626755482c1c5f5e943` | docs/CJ_INTELLIGENCE_IDENTIDAD.md |
++| `a36efc03f92d8d235a197dd1509f52a7c507da5f0d4f250893e8289b92491fa3` | docs/CJ_INTELLIGENCE_PILOTO_CONTROL_IDENTIDAD.md |
+ | `f21d18fa9eb095540fb81214a27944eb6e0d5168ad8bf8c7ca6c6e01d7db73e3` | docs/HALLAZGO_RESPALDO_LOG_JC_Db.md |
+
+--- a/CjERP.Backend/Database/IaChat/18_CjIntelligence_Esquema.sql
++++ b/CjERP.Backend/Database/IaChat/18_CjIntelligence_Esquema.sql
+@@ -284,6 +284,8 @@
+ GO
+ 
+--- Disparador de inmutabilidad: IdIdentidad no cambia nunca; IdUsuario solo cambia dentro de sp_IA_Cj_Identidad_Resolver (SESSION_CONTEXT).
+--- Evita que un UPDATE accidental devuelva conversaciones archivadas a un login.
++-- Disparador de inmutabilidad: IdIdentidad no cambia nunca; IdUsuario solo cambia con la marca de sesion que activa sp_IA_Cj_Identidad_Resolver.
++-- Es una PROTECCION CONTRA ACTUALIZACIONES ACCIDENTALES: NO demuestra que solo Resolver pueda establecer la marca (cualquier sesion con permiso
++-- puede llamar a sp_set_session_context). Una manipulacion deliberada no devolveria el historial de todos modos: IdIdentidad es inmutable y toda
++-- operacion exige la identidad VIGENTE del login.
+ CREATE OR ALTER TRIGGER dbo.TR_IA_Conversacion_Identidad ON dbo.IA_Conversacion AFTER UPDATE
+ AS
+
+--- a/CjERP.Backend/Database/IaChat/19_CjIntelligence_Procedimientos.sql
++++ b/CjERP.Backend/Database/IaChat/19_CjIntelligence_Procedimientos.sql
+@@ -38,5 +38,6 @@
+      SEPARAR   = es otra persona: el historial anterior se archiva sin borrar (IdUsuario = '~retirada:<guid>' y, ademas, conserva su IdIdentidad
+                  RETIRADA, que ningun login puede igualar) y el login recibe una identidad nueva y vacia. El disparador TR_IA_Conversacion_Identidad
+-                 impide devolver el historial por un UPDATE accidental.
++                 protege contra actualizaciones ACCIDENTALES (no es prueba de que solo Resolver pueda activar la marca: cualquier sesion con permiso puede llamar a
++                 sp_set_session_context; la defensa real contra una manipulacion deliberada es IdIdentidad y los permisos).
+    Ninguno se concede a cj_ia, ninguno se ejecuta solo y ninguno toca dbo.Usuario. vw_IA_Cj_Identidad_Conflicto lista los conflictos pendientes.
+ 
+@@ -203,48 +204,59 @@
+     DECLARE @IdIdentidad UNIQUEIDENTIFIER, @EmpReg INT, @DocReg CHAR(64), @Nueva UNIQUEIDENTIFIER, @Conv INT = 0, @Turnos INT = 0;
+ 
+-    BEGIN TRAN;
+-    SELECT @IdIdentidad = i.IdIdentidad, @EmpReg = i.IdEmpleado, @DocReg = i.HuellaDocumento
+-    FROM dbo.IA_IdentidadUsuario i WITH (UPDLOCK, HOLDLOCK) WHERE i.IdUsuario = @Login AND i.Estado = 'VIGENTE';
+-
+-    IF @IdIdentidad IS NULL OR (@EmpReg = @Emp AND @DocReg = @Doc)
+-        THROW 51073, 'No hay conflicto de identidad para este login: no se hace nada.', 1;
+-
+-    IF @Accion = 'CONTINUAR'
+-    BEGIN
+-        -- misma persona = mismo documento. Si el documento cambio, NO se puede continuar: es otra persona (o un dato corregido que hay que revisar y separar).
+-        IF @DocReg <> @Doc
+-            THROW 51074, 'El documento de la persona cambio: no se puede CONTINUAR. Si es otra persona, use SEPARAR.', 1;
+-
+-        UPDATE dbo.IA_IdentidadUsuario
+-        SET IdEmpleadoAnterior = IdEmpleado, IdEmpleado = @Emp, Resolucion = 'CONTINUAR',
+-            ResueltaPor = @AprobadoPor, FechaResolucion = SYSUTCDATETIME(), Motivo = @Motivo
+-        WHERE IdIdentidad = @IdIdentidad;
+-        SET @Nueva = @IdIdentidad;
+-    END
+-    ELSE
+-    BEGIN
+-        -- SEPARAR: el historial anterior no se borra. Se archiva bajo un propietario inalcanzable Y conserva su IdIdentidad (que pasa a RETIRADA).
+-        DECLARE @Archivo NVARCHAR(50) = N'~retirada:' + LOWER(CONVERT(NVARCHAR(36), @IdIdentidad));
+-        EXEC sp_set_session_context @key = N'cjia_resolver', @value = 1;
+-        UPDATE dbo.IA_Conversacion SET IdUsuario = @Archivo WHERE IdUsuario = @Login AND IdIdentidad = @IdIdentidad;
+-        SET @Conv = @@ROWCOUNT;
+-        EXEC sp_set_session_context @key = N'cjia_resolver', @value = NULL;
+-        UPDATE dbo.IA_Turno SET IdUsuario = @Archivo WHERE IdUsuario = @Login AND IdConversacion IN (SELECT IdConversacion FROM dbo.IA_Conversacion WHERE IdIdentidad = @IdIdentidad);
+-        SET @Turnos = @@ROWCOUNT;
+-
+-        UPDATE dbo.IA_IdentidadUsuario
+-        SET Estado = 'RETIRADA', IdEmpleadoAnterior = IdEmpleado, Resolucion = 'SEPARAR',
+-            ResueltaPor = @AprobadoPor, FechaResolucion = SYSUTCDATETIME(), Motivo = @Motivo
+-        WHERE IdIdentidad = @IdIdentidad;
+-
+-        SET @Nueva = NEWID();
+-        INSERT dbo.IA_IdentidadUsuario (IdIdentidad, IdUsuario, IdEmpleado, HuellaDocumento) VALUES (@Nueva, @Login, @Emp, @Doc);
+-    END
+-
+-    INSERT dbo.IA_IdentidadAuditoria (IdUsuario, Accion, AdminSql, AprobadoPor, Motivo, Evidencia, IdIdentidadAnterior, IdIdentidadPosterior,
+-                                      IdEmpleadoAnterior, HuellaDocAnterior, IdEmpleadoPosterior, HuellaDocPosterior, ConversacionesArchivadas, TurnosArchivados)
+-    VALUES (@Login, @Accion, ORIGINAL_LOGIN(), @AprobadoPor, @Motivo, @Evidencia, @IdIdentidad, @Nueva,
+-            @EmpReg, @DocReg, @Emp, @Doc, @Conv, @Turnos);
+-    COMMIT;
++    -- La marca de sesion 'cjia_resolver' (proteccion contra actualizaciones ACCIDENTALES de IdUsuario; ver el disparador) se activa SOLO durante el
++    -- archivado y se limpia SIEMPRE: al terminar bien y ante CUALQUIER error (sp_set_session_context no es transaccional: un ROLLBACK no la limpia).
++    BEGIN TRY
++        BEGIN TRAN;
++        SELECT @IdIdentidad = i.IdIdentidad, @EmpReg = i.IdEmpleado, @DocReg = i.HuellaDocumento
++        FROM dbo.IA_IdentidadUsuario i WITH (UPDLOCK, HOLDLOCK) WHERE i.IdUsuario = @Login AND i.Estado = 'VIGENTE';
++
++        IF @IdIdentidad IS NULL OR (@EmpReg = @Emp AND @DocReg = @Doc)
++            THROW 51073, 'No hay conflicto de identidad para este login: no se hace nada.', 1;
++
++        IF @Accion = 'CONTINUAR'
++        BEGIN
++            -- misma persona = mismo documento. Si el documento cambio, NO se continua ni se reasigna el historial: es otra persona o un dato
++            -- corregido que debe revisar un administrador; el login sigue denegado y solo cabe SEPARAR (accion explicita, nunca automatica).
++            IF @DocReg <> @Doc
++                THROW 51074, 'El documento de la persona cambio: no se puede CONTINUAR. Si es otra persona, use SEPARAR.', 1;
++
++            UPDATE dbo.IA_IdentidadUsuario
++            SET IdEmpleadoAnterior = IdEmpleado, IdEmpleado = @Emp, Resolucion = 'CONTINUAR',
++                ResueltaPor = @AprobadoPor, FechaResolucion = SYSUTCDATETIME(), Motivo = @Motivo
++            WHERE IdIdentidad = @IdIdentidad;
++            SET @Nueva = @IdIdentidad;
++        END
++        ELSE
++        BEGIN
++            -- SEPARAR: el historial anterior no se borra. Se archiva bajo un propietario inalcanzable Y conserva su IdIdentidad (que pasa a RETIRADA).
++            DECLARE @Archivo NVARCHAR(50) = N'~retirada:' + LOWER(CONVERT(NVARCHAR(36), @IdIdentidad));
++            EXEC sp_set_session_context @key = N'cjia_resolver', @value = 1;
++            UPDATE dbo.IA_Conversacion SET IdUsuario = @Archivo WHERE IdUsuario = @Login AND IdIdentidad = @IdIdentidad;
++            SET @Conv = @@ROWCOUNT;
++            UPDATE dbo.IA_Turno SET IdUsuario = @Archivo WHERE IdUsuario = @Login AND IdConversacion IN (SELECT IdConversacion FROM dbo.IA_Conversacion WHERE IdIdentidad = @IdIdentidad);
++            SET @Turnos = @@ROWCOUNT;
++            EXEC sp_set_session_context @key = N'cjia_resolver', @value = NULL;     -- fin del archivado: la marca se limpia de inmediato
++
++            UPDATE dbo.IA_IdentidadUsuario
++            SET Estado = 'RETIRADA', IdEmpleadoAnterior = IdEmpleado, Resolucion = 'SEPARAR',
++                ResueltaPor = @AprobadoPor, FechaResolucion = SYSUTCDATETIME(), Motivo = @Motivo
++            WHERE IdIdentidad = @IdIdentidad;
++
++            SET @Nueva = NEWID();
++            INSERT dbo.IA_IdentidadUsuario (IdIdentidad, IdUsuario, IdEmpleado, HuellaDocumento) VALUES (@Nueva, @Login, @Emp, @Doc);
++        END
++
++        INSERT dbo.IA_IdentidadAuditoria (IdUsuario, Accion, AdminSql, AprobadoPor, Motivo, Evidencia, IdIdentidadAnterior, IdIdentidadPosterior,
++                                          IdEmpleadoAnterior, HuellaDocAnterior, IdEmpleadoPosterior, HuellaDocPosterior, ConversacionesArchivadas, TurnosArchivados)
++        VALUES (@Login, @Accion, ORIGINAL_LOGIN(), @AprobadoPor, @Motivo, @Evidencia, @IdIdentidad, @Nueva,
++                @EmpReg, @DocReg, @Emp, @Doc, @Conv, @Turnos);
++        COMMIT;
++        EXEC sp_set_session_context @key = N'cjia_resolver', @value = NULL;         -- defensa adicional: nunca queda activada al terminar
++    END TRY
++    BEGIN CATCH
++        EXEC sp_set_session_context @key = N'cjia_resolver', @value = NULL;         -- limpia la marca ante CUALQUIER error
++        IF @@TRANCOUNT > 0 ROLLBACK;                                                -- revierte archivado, identidad y auditoria juntos
++        THROW;
++    END CATCH;
+ END;
+ GO
+
+--- a/CjERP.Backend/Database/IaChat/21_CjIntelligence_Validacion_SoloLectura.sql
++++ b/CjERP.Backend/Database/IaChat/21_CjIntelligence_Validacion_SoloLectura.sql
+@@ -117,4 +117,11 @@
+ 
+     INSERT @r (Chequeo, Resultado, Detalle)
++    SELECT 'Resolver limpia la marca de sesion al terminar y ante cualquier error (TRY/CATCH + ROLLBACK)',
++           CASE WHEN OBJECT_DEFINITION(OBJECT_ID('dbo.sp_IA_Cj_Identidad_Resolver')) LIKE '%BEGIN CATCH%'
++                 AND OBJECT_DEFINITION(OBJECT_ID('dbo.sp_IA_Cj_Identidad_Resolver')) LIKE '%ROLLBACK%'
++                 AND (LEN(OBJECT_DEFINITION(OBJECT_ID('dbo.sp_IA_Cj_Identidad_Resolver'))) - LEN(REPLACE(OBJECT_DEFINITION(OBJECT_ID('dbo.sp_IA_Cj_Identidad_Resolver')), '@value = NULL', ''))) / LEN('@value = NULL') >= 3
++                THEN 'OK' ELSE 'FALLA' END, NULL;
++
++    INSERT @r (Chequeo, Resultado, Detalle)
+     SELECT 'Vista de conflictos de identidad', CASE WHEN OBJECT_ID('dbo.vw_IA_Cj_Identidad_Conflicto', 'V') IS NOT NULL THEN 'OK' ELSE 'FALLA' END, NULL;
+ 
+
+--- a/CjERP.Backend/Database/IaChat/22_CjIntelligence_PruebaFuncional.sql
++++ b/CjERP.Backend/Database/IaChat/22_CjIntelligence_PruebaFuncional.sql
+@@ -542,4 +542,5 @@
+         EXEC dbo.sp_IA_Cj_Identidad_Resolver @IdUsuario = @U, @Accion = 'CONTINUAR', @AprobadoPor = N'prueba-22', @Motivo = N'reingreso con el mismo documento', @Evidencia = N'ficha de RRHH de prueba: mismo documento', @ConfirmaMismaPersona = 1;
+         INSERT @res (Prueba, Esperado, Obtenido) VALUES ('CONTINUAR (mismo documento): el login vuelve a ser valido', @U, ISNULL(dbo.fn_IA_Cj_UsuarioValido(@U), 'NULL'));
++        INSERT @res (Prueba, Esperado, Obtenido) VALUES ('CONTINUAR: la marca de sesion no queda habilitada', 'NULL', ISNULL(CONVERT(VARCHAR(10), SESSION_CONTEXT(N'cjia_resolver')), 'NULL'));
+         SET @enc = 0; EXEC dbo.sp_IA_Cj_Conversacion_Abrir @IdUsuario = @U, @IdConversacion = @cG, @Encontrada = @enc OUTPUT;
+         INSERT @res (Prueba, Esperado, Obtenido) VALUES ('CONTINUAR: el historial sigue accesible', '1', CAST(@enc AS VARCHAR(2)));
+@@ -563,4 +564,5 @@
+         EXEC dbo.sp_IA_Cj_Identidad_Resolver @IdUsuario = @U, @Accion = 'SEPARAR', @AprobadoPor = N'prueba-22', @Motivo = N'otra persona', @Evidencia = N'documento distinto en RRHH de prueba', @ConfirmaMismaPersona = 0;
+         INSERT @res (Prueba, Esperado, Obtenido) VALUES ('SEPARAR: el login vuelve a ser valido (identidad nueva)', @U, ISNULL(dbo.fn_IA_Cj_UsuarioValido(@U), 'NULL'));
++        INSERT @res (Prueba, Esperado, Obtenido) VALUES ('SEPARAR: la marca de sesion no queda habilitada', 'NULL', ISNULL(CONVERT(VARCHAR(10), SESSION_CONTEXT(N'cjia_resolver')), 'NULL'));
+         DECLARE @idNueva UNIQUEIDENTIFIER = dbo.fn_IA_Cj_IdentidadVigente(@U);
+         INSERT @res (Prueba, Esperado, Obtenido) VALUES ('SEPARAR: la identidad vigente es otra', '1', CAST(CASE WHEN @idNueva IS NOT NULL AND @idNueva <> @idU THEN 1 ELSE 0 END AS VARCHAR(2)));
+@@ -605,4 +607,32 @@
+             AND HuellaDocAnterior = REPLICATE('A', 64) AND HuellaDocPosterior = @docU AND IdEmpleadoPosterior = @empU AND ConversacionesArchivadas >= 1 AND TurnosArchivados >= 1;
+         INSERT @res (Prueba, Esperado, Obtenido) VALUES ('Auditoria de SEPARAR: administrador, aprobador, motivo, evidencia, valores antes/despues y filas archivadas', '1', CAST(@n AS VARCHAR(10)));
++
++        -- G8. FALLO FORZADO despues de activar la marca: Resolver debe limpiarla en la MISMA sesion y revertir todo.
++        -- Fallo natural y determinista (sin ganchos de prueba en el procedimiento): se prepara un turno ya archivado bajo el propietario
++        -- '~retirada:<identidad vigente>' con el mismo ClientMessageId que un turno del login; al archivar, el UPDATE de IA_Turno choca con el
++        -- indice unico UX_IA_Turno_Usuario_ClientMessage (2601) DESPUES de haber activado la marca y de haber archivado la conversacion.
++        DECLARE @cH UNIQUEIDENTIFIER, @cmH UNIQUEIDENTIFIER = NEWID(), @ownH UNIQUEIDENTIFIER = NEWID(), @cOtroConv UNIQUEIDENTIFIER;
++        DELETE @x; INSERT @x EXEC dbo.sp_IA_Cj_Conversacion_Crear @IdUsuario = @U, @Titulo = NULL, @Modulo = 'PRUEBA';
++        SELECT @cH = IdConversacion FROM @x; INSERT @creadas SELECT @cH WHERE @cH NOT IN (SELECT IdConversacion FROM @creadas);
++        DELETE @t; INSERT @t EXEC dbo.sp_IA_Cj_Turno_Iniciar @U, @cH, @cmH, @ownH, N'turno del fallo forzado', 120;
++        SELECT @cOtroConv = MIN(IdConversacion) FROM dbo.IA_Conversacion WHERE IdUsuario = @Otro AND IdConversacion IN (SELECT IdConversacion FROM @creadas);
++        INSERT dbo.IA_Turno (IdConversacion, IdUsuario, ClientMessageId, Estado)
++        VALUES (@cOtroConv, N'~retirada:' + LOWER(CONVERT(NVARCHAR(36), @idNueva)), @cmH, 'ERROR');            -- fila de prueba; la limpia la limpieza por conversacion
++        UPDATE dbo.IA_IdentidadUsuario SET HuellaDocumento = REPLICATE('B', 64) WHERE IdIdentidad = @idNueva;     -- crea un conflicto (otro documento)
++
++        SET @en = NULL;
++        BEGIN TRY EXEC dbo.sp_IA_Cj_Identidad_Resolver @IdUsuario = @U, @Accion = 'SEPARAR', @AprobadoPor = N'prueba-22', @Motivo = N'fallo forzado', @Evidencia = N'evidencia de prueba suficiente (fallo forzado)'; SET @en = 0; END TRY
++        BEGIN CATCH SET @en = ERROR_NUMBER(); END CATCH;
++        INSERT @res (Prueba, Esperado, Obtenido) VALUES ('Fallo forzado tras activar la marca: Resolver propaga el error original (indice unico)', '2601', CAST(@en AS VARCHAR(10)));
++        INSERT @res (Prueba, Esperado, Obtenido) VALUES ('Fallo forzado: la marca de sesion NO queda habilitada en la misma sesion', 'NULL', ISNULL(CONVERT(VARCHAR(10), SESSION_CONTEXT(N'cjia_resolver')), 'NULL'));
++        SET @en = NULL; BEGIN TRY UPDATE dbo.IA_Conversacion SET IdUsuario = @Otro WHERE IdConversacion = @cH; SET @en = 0; END TRY BEGIN CATCH SET @en = ERROR_NUMBER(); END CATCH;
++        INSERT @res (Prueba, Esperado, Obtenido) VALUES ('Fallo forzado: un UPDATE directo de IdUsuario sigue rechazado (51081)', '51081', CAST(@en AS VARCHAR(10)));
++        INSERT @res (Prueba, Esperado, Obtenido) VALUES ('Fallo forzado: no queda transaccion abierta', '0', CAST(@@TRANCOUNT AS VARCHAR(10)));
++        SELECT @n = COUNT(*) FROM dbo.IA_Conversacion WHERE IdConversacion = @cH AND IdUsuario = @U AND IdIdentidad = @idNueva;
++        INSERT @res (Prueba, Esperado, Obtenido) VALUES ('Fallo forzado: el archivado se revirtio (la conversacion sigue siendo del login)', '1', CAST(@n AS VARCHAR(10)));
++        SELECT @n = COUNT(*) FROM dbo.IA_IdentidadUsuario WHERE IdIdentidad = @idNueva AND Estado = 'VIGENTE' AND Resolucion IS NULL;
++        INSERT @res (Prueba, Esperado, Obtenido) VALUES ('Fallo forzado: la identidad no cambio de estado', '1', CAST(@n AS VARCHAR(10)));
++        SELECT @n = COUNT(*) FROM dbo.IA_IdentidadAuditoria WHERE IdIdentidadAnterior = @idNueva;
++        INSERT @res (Prueba, Esperado, Obtenido) VALUES ('Fallo forzado: no se registro auditoria de una resolucion que no ocurrio', '0', CAST(@n AS VARCHAR(10)));
+     END
+ END TRY
+
+--- a/docs/CJ_INTELLIGENCE_DECISIONES_PENDIENTES.md
++++ b/docs/CJ_INTELLIGENCE_DECISIONES_PENDIENTES.md
+@@ -76,6 +76,6 @@
+ |---|---|
+ | Control de identidad (reutilización de logins): diseño y pruebas preparados en `CJ_INTELLIGENCE_IDENTIDAD.md`; **no resuelto** hasta aplicarlo y que `21` (0 conflictos), `22` (E–G), `23` y `SqlIdentityIntegrationTests` pasen | Preparado, no ejecutado |
+-| Escenario «mismo login y mismo `IdEmpleado` reutilizado para otra persona»: solo se detecta si cambia el documento del registro; **la base no lo impone**. Requiere control de proceso (RRHH) o aceptar el riesgo residual | **Abierto** (decisión suya) |
+-| Estabilidad de `IdEmpleado`: puede cambiar (reingreso), reutilizarse (`MAX+1`) y `Empleado` no tiene clave única | Documentado; **no confirmada** |
++| Escenario «otra persona con el mismo login, `IdEmpleado` y documento»: el sistema no lo detecta; **no se acepta como resuelto**. Control operativo definido en `CJ_INTELLIGENCE_PILOTO_CONTROL_IDENTIDAD.md` (validación de habilitados, aviso previo de reingresos, suspensión y SEPARAR antes de entregar un login, conciliación semanal) | Definido; **responsables por designar** (bloquea el piloto) |
++| Estabilidad de `IdEmpleado`: puede cambiar (reingreso); la reutilización por `MAX+1` es una posibilidad de diseño no observada; hay 6 huecos de numeración de causa no confirmada; `Empleado` no tiene clave única | Documentado; **no confirmada** |
+ | Pruebas de integración satisfactorias (SQL, concurrencia de dos sesiones, primer mensaje simultáneo, pagos reales acotada) | Preparadas, **no ejecutadas** |
+ | Por usuario: solo los correctamente configurados (activo, huella válida = `IdEmpleado > 0` + documento en `EmpleadoCj`, permisos de `IaToolPermiso`). Hoy **280 de 313 activos** tienen huella válida; **33** quedarían denegados hasta corregir datos en RRHH | Los seis observados y esos 33 pueden seguir denegados sin bloquear a los demás |
+
+--- a/docs/CJ_INTELLIGENCE_IDENTIDAD.md
++++ b/docs/CJ_INTELLIGENCE_IDENTIDAD.md
+@@ -16,7 +16,8 @@
+ | **Login generado** | `SP_GenerarUsuario` / `ResolveGeneratedUserName`: inicial + apellido (hasta 10 caracteres) mientras no exista ese login en `Usuario`. Si existe (homónimo), el `UPDATE` anterior **reapunta esa fila a otra persona**. | **Otra persona recibe el mismo login**, con un `IdEmpleado` nuevo y otro documento. |
+ | **Corrección** | Los `UPDATE` de `EmpleadoCj` no tienen restricción sobre el documento. Hoy **50 de 313 usuarios activos** tienen `NroDocumento` distinto entre `Empleado` y `EmpleadoCj` (la copia legada no se sincroniza); 9 `Empleado` y 33 `EmpleadoCj` sin documento. | El documento es editable y está incompleto. |
+-| **Eliminación / reutilización** | `EmpleadoCj` tiene 6 huecos de numeración (1–1292, 1286 filas): **hubo borrados físicos fuera del código revisado**. Con `MAX+1`, borrar la última fila hace que su `IdEmpleado` se **reutilice**. | **El identificador puede reutilizarse.** |
++| **Huecos de numeración** | `EmpleadoCj` tiene 6 huecos (ids 1–1292, 1286 filas). **Existen huecos de numeración; su causa no está confirmada** (puede ser un borrado, una carga con saltos, una reversión u otra). | Sin conclusión sobre el origen. |
++| **Reutilización por `MAX+1` (posibilidad por diseño)** | Como el nuevo `IdEmpleado` es `MAX+1`, si alguna vez se eliminara la **última** fila, su identificador se asignaría de nuevo a la siguiente persona. **No se observó ningún caso** ni se confirmó que el sistema elimine filas; se documenta como posibilidad. | Un `IdEmpleado` podría reutilizarse para otra persona. |
+ 
+-**Respuesta a la pregunta:** `IdEmpleado` **puede cambiar para la misma persona** (reingreso), **puede reutilizarse para otra** (borrado de la última fila + `MAX+1`) y **no está protegido** por ninguna restricción en `Empleado`. **No se confirma su estabilidad** y por eso no se usa solo como huella.
++**Respuesta a la pregunta:** `IdEmpleado` **puede cambiar para la misma persona** (reingreso), **podría reutilizarse para otra** por el diseño `MAX+1` (posibilidad no observada; la causa de los huecos de numeración no está confirmada) y **no está protegido** por ninguna restricción en `Empleado`. **No se confirma su estabilidad** y por eso no se usa solo como huella.
+ 
+ ## 3. Huella: `IdEmpleado` + documento
+@@ -29,8 +30,8 @@
+ | Homónimo / login reapuntado a otra persona | cambia | **cambia** | Denegado; **CONTINUAR se rechaza**; solo **SEPARAR** |
+ | **Mismo login y mismo `IdEmpleado` reutilizado para otra persona** | igual | **cambia** | Denegado; solo **SEPARAR** → **detectado** si el documento del registro es el de la persona nueva |
+-| Documento corregido por error de digitación | igual | cambia | Denegado; CONTINUAR rechazado; hay que SEPARAR (pierde el historial; es el costo de fallar cerrado) |
++| Documento corregido (por error de digitación u otra causa) | igual | cambia | **Denegado y a revisión administrativa.** No se continúa ni se reasigna el historial de forma automática: CONTINUAR se rechaza; solo un administrador, con evidencia y aprobación, puede ejecutar SEPARAR (el historial queda archivado, no borrado) |
+ | Mismo login, mismo `IdEmpleado`, mismo documento | igual | igual | **No se distingue**: es, por definición, la misma persona según los datos |
+ 
+-**Escenario que pidió verificar (mismo login + mismo `IdEmpleado` reutilizado para otra persona): NO se declara resuelto.** El control lo detecta **solo si el documento del registro cambia con la persona**. Eso depende de un proceso que la base **no impone** (no hay restricción ni disparador sobre `NroDocumento`, y el documento falta o difiere en varios registros). Si alguien reutiliza el `IdEmpleado` **sin actualizar el documento**, el control no lo detecta. Mitigación pendiente (PV, fuera de esta entrega): una regla de RRHH o restricción que exija documento válido al reasignar un empleado, o un campo de identidad inmutable en `EmpleadoCj`.
++**Escenario que pidió verificar (mismo login + mismo `IdEmpleado` reutilizado para otra persona): NO se declara resuelto.** El control lo detecta **solo si el documento del registro cambia con la persona**. Eso depende de un proceso que la base **no impone** (no hay restricción ni disparador sobre `NroDocumento`, y el documento falta o difiere en varios registros). Si alguien reutiliza el `IdEmpleado` **sin actualizar el documento**, el control no lo detecta. **Para el piloto el riesgo se cubre con un control operativo** (quién valida a las personas habilitadas, cómo se avisan reingresos y reasignaciones, quién suspende el acceso y ejecuta SEPARAR antes de entregar un login), definido en `CJ_INTELLIGENCE_PILOTO_CONTROL_IDENTIDAD.md`. Sigue **sin considerarse resuelto** técnicamente: una restricción en el ERP (documento válido al reasignar un empleado, o un identificador inmutable en `EmpleadoCj`) queda fuera de esta entrega.
+ 
+ ## 4. Primera huella y huella ausente
+@@ -48,5 +49,6 @@
+ 1. **Propietario inalcanzable:** `IA_Conversacion.IdUsuario` y `IA_Turno.IdUsuario` pasan a `~retirada:<guid>`, que `fn_IA_Cj_UsuarioValido` nunca acepta como login.
+ 2. **Identidad permanente en cada conversación:** `IA_Conversacion.IdIdentidad` (NOT NULL, FK a `IA_IdentidadUsuario`, **inmutable**). Todas las operaciones (listar, abrir, renombrar, eliminar, iniciar/renovar/completar turno, registrar resultado, guardar estado) exigen `IdIdentidad = fn_IA_Cj_IdentidadVigente(login)`. Aunque alguien devolviera `IdUsuario` al login, la conversación sigue siendo de la identidad `RETIRADA`.
+-3. **Disparador `TR_IA_Conversacion_Identidad`:** `IdIdentidad` no cambia nunca; `IdUsuario` solo cambia dentro de `Resolver` (marca de sesión), así un `UPDATE` accidental falla (51080/51081).
++3. **Disparador `TR_IA_Conversacion_Identidad`:** `IdIdentidad` no cambia nunca y `IdUsuario` solo cambia con la marca de sesión `cjia_resolver` que activa `Resolver`. **Es una protección contra actualizaciones accidentales** (un `UPDATE` suelto falla con 51080/51081); **no demuestra que solo `Resolver` pueda establecer la marca**: cualquier sesión con permiso puede llamar a `sp_set_session_context`. Una manipulación deliberada tampoco devolvería el historial, por la barrera 2 (`IdIdentidad`) y los permisos.
++   - **Limpieza garantizada:** `Resolver` usa `TRY/CATCH`; activa la marca solo durante el archivado y la limpia al terminar bien y ante cualquier error (`sp_set_session_context` no es transaccional, así que un `ROLLBACK` no la limpia). El `CATCH` limpia la marca, revierte la transacción (archivado, identidad y auditoría juntos) y relanza el error original.
+ 4. **Permisos:** `cj_ia` no tiene `UPDATE` sobre ninguna tabla ni `EXECUTE` sobre `Resolver`/`Asegurar`.
+ 
+@@ -63,4 +65,5 @@
+ | `22` secciones E–G (escribe; limpieza propia) | Primera huella; huella ausente (denegado, 51010, sin filas creadas); disparador (51080/51081); **reingreso** (denegado en listar/abrir/crear/turnos/pagos); validaciones de `Resolver` (51070/51071/51075); **CONTINUAR** con mismo documento (acceso e historial) y su auditoría completa; **mismo `IdEmpleado` con otro documento** (CONTINUAR rechazado 51074); **SEPARAR**: historial no accesible desde Abrir/Listar/Renombrar/Eliminar/Turno_Iniciar, no borrado, archivado, **restauración forzada de `IdUsuario` sin efecto**, conversaciones nuevas con la identidad nueva, auditoría de SEPARAR |
+ | `23` (como `cj_ia`) | `cj_ia` sin `EXECUTE` sobre `Resolver`/`Asegurar`, sin `SELECT` sobre identidad/auditoría, sin `UPDATE` sobre `IA_Conversacion` (se consulta con `HAS_PERMS_BY_NAME`, no se ejecuta) |
++| `22` sección G8 (escribe; limpieza propia) | **Fallo forzado después de activar la marca**, sin ganchos de prueba: un turno ya archivado bajo el mismo propietario y `ClientMessageId` hace chocar el `UPDATE` de `IA_Turno` con el índice único (2601) tras activar la marca y archivar la conversación. Comprueba: se propaga el error original; la marca **no queda habilitada en la misma sesión**; un `UPDATE` directo de `IdUsuario` sigue rechazado (51081); `@@TRANCOUNT = 0`; el archivado se revirtió; la identidad no cambió; sin auditoría. Tras CONTINUAR y SEPARAR exitosos también comprueba que la marca queda limpia |
+ | `Tests.Api` `CjIntelligenceIdentityApiTests` (**unitarias, ejecutadas: 2/2**) | **Controlador real + servicio de chat real**: con conflicto de identidad todas las rutas responden 403 y el modelo y pagos no se alcanzan; tras SEPARAR, Abrir/Renombrar/Eliminar/Chat responden 404 y el listado queda vacío |
+ | `Tests.Integration` `SqlIdentityIntegrationTests` (**omitida**, gate `CJ_SQL_IDENTITY`) | El recorrido completo contra SQL real, **desde los procedimientos (store) y desde la API** (controlador real sobre el almacén real): reutilización, CONTINUAR sin confirmar (51075), CONTINUAR (acceso), documento distinto (51074), SEPARAR (404/200), identidades y auditoría; falla (no se omite en silencio) si el usuario de prueba ya usaba el módulo |
+@@ -68,3 +71,3 @@
+ 
+ ## 10. Cuándo se considera resuelto
+-No por la bandera `CjIntelligence:LoginReuseControlResolved` (solo confirmación operativa). Se considera resuelto cuando: (1) 18, 19 y 20 aplicados; (2) `21` sin fallas y con 0 conflictos; (3) `22` (E–G) y `23` sin fallas; (4) `SqlIdentityIntegrationTests` y la concurrencia aprobadas; **y (5) el escenario "mismo `IdEmpleado` reutilizado" tenga un control de proceso sobre el documento (RRHH) o se acepte expresamente el riesgo residual.** Todo requiere la autorización de ejecución, hoy pendiente.
++No por la bandera `CjIntelligence:LoginReuseControlResolved` (solo confirmación operativa). Se considera resuelto cuando: (1) 18, 19 y 20 aplicados; (2) `21` sin fallas y con 0 conflictos; (3) `22` (E–G) y `23` sin fallas; (4) `SqlIdentityIntegrationTests` y la concurrencia aprobadas; **y (5) el control operativo del piloto (`CJ_INTELLIGENCE_PILOTO_CONTROL_IDENTIDAD.md`) tenga responsables designados y operando.** El escenario de otra persona con el mismo login, `IdEmpleado` y documento **no se acepta como resuelto**: el control operativo lo mitiga, no lo elimina. Todo requiere la autorización de ejecución, hoy pendiente.
+
+=== NUEVO: docs/CJ_INTELLIGENCE_PILOTO_CONTROL_IDENTIDAD.md (59 lineas; contenido completo en el paquete)

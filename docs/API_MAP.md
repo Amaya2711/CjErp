@@ -127,6 +127,7 @@
 | POST /admin/vacaciones | C/VacacionesController | VacacionesService → `sp_EmpleadoOtros_GrabarVacaciones` (IdEstado 97) | vacacionesService.crearVacacion (vacaciones.tsx, vacacionespage.tsx) |
 | POST /admin/vacaciones/aprobar | VacacionesController | `sp_EmpleadoOtros_ActualizaarVacaciones` | aprobarVacacion |
 | POST /admin/vacaciones/rechazar | VacacionesController | UPDATE inline EmpleadoOtros → 0 | rechazarVacacion |
+| POST /admin/vacaciones/modificar-fechas | VacacionesController | VacacionesService.ModificarFechasAsync (UPDATE inline EmpleadoOtros, solo 97/98/99; valida mín. 7 días, cruces y saldo − días de otras pendientes; PV: validar en BD) | modificarFechasVacacion (botón "Modificar fechas", permiso `button.modificar`) |
 | GET /admin/vacaciones/listar?consulta= | VacacionesController | PlanillaConsultaService (`vacaciones`/`vacaciones-total`; `consulta` libre) | listarVacaciones |
 | POST /admin/vacaciones/politica · /periodo/generar · /periodo/generar-masivo · /solicitud · /solicitud/{aprobar,rechazar,cancelar,finalizar} · /movimiento/revertir; GET /saldo/{id} · /solicitud/listar | VacacionesController | `sp_Vacacion_*` (modelo nuevo) | **sin UI** (funciones existen en vacacionesService.ts) |
 | GET /admin/vacaciones/movimiento/listar | VacacionesController | SQL inline VacacionMovimiento | vacacionespage.tsx |

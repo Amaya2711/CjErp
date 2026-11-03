@@ -15,6 +15,16 @@ public sealed class VacacionesRechazarRequestDto
     public DateTime FechaFin { get; set; }
 }
 
+/// <summary>Cambia las fechas de una solicitud que aún no tiene la 3ra validación aprobada (estados 97/98/99).</summary>
+public sealed class VacacionesModificarFechasRequestDto
+{
+    public int IdEmpleadoCj { get; set; }
+    public DateTime FechaInicio { get; set; }
+    public DateTime FechaFin { get; set; }
+    public DateTime NuevaFechaInicio { get; set; }
+    public DateTime NuevaFechaFin { get; set; }
+}
+
 public sealed class VacacionesAprobarRequestDto
 {
     public int IdEmpleadoCj { get; set; }

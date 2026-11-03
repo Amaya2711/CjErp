@@ -164,6 +164,42 @@ public class VacacionesController : ControllerBase
         }
     }
 
+    [HttpPost("modificar-fechas")]
+    public async Task<IActionResult> ModificarFechas(
+        [FromBody] VacacionesModificarFechasRequestDto request,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var result = await _vacacionesService.ModificarFechasAsync(request, ResolveUsuarioAccion(), cancellationToken);
+
+            if ((result.Exito ?? result.Resultado ?? 1) != 1)
+            {
+                return BadRequest(new
+                {
+                    success = false,
+                    message = result.Mensaje ?? "No se pudo modificar las fechas de las vacaciones.",
+                    data = result
+                });
+            }
+
+            return Ok(new
+            {
+                success = true,
+                message = result.Mensaje ?? "Fechas de vacaciones modificadas correctamente.",
+                data = result
+            });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { success = false, message = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { success = false, message = ex.Message, detail = ex.InnerException?.Message });
+        }
+    }
+
     [HttpPost("aprobar")]
     public async Task<IActionResult> Aprobar(
         [FromBody] VacacionesAprobarRequestDto request,

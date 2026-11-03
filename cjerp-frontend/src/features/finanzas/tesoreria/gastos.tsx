@@ -361,6 +361,8 @@ type GastoGridRow = {
   factura: string;
 };
 
+const BLOQUE_ACTUALIZACION_MASIVA = 10;
+
 type ActualizacionMasivaResponse = {
   idLote: string;
   solicitados: number;
@@ -4055,14 +4057,30 @@ const [busqueda, setBusqueda] = useState("");
     setMasivoGuardando(true);
     setMasivoError(null);
     try {
-      const resultado = await httpClient.post<ActualizacionMasivaResponse>(`${GASTOS_API_URL}/actualizar-masivo`, {
-        correlativos: masivoObjetivo.map((row) => Number(row.gasto.id)).filter((id) => id > 0),
-        serie: masivoSerie.trim() || undefined,
-        fecEmision: masivoFecEmision || undefined,
-        fechaPagoCre: masivoFechaPagoCre || undefined,
-        facturaPath: masivoFactura?.path || undefined,
-        motivo: masivoMotivo.trim(),
-      });
+      // El servidor actualiza registro por registro (varias consultas cada uno) y en producción 30 s no alcanzan:
+      // se envía en bloques con espera ampliada y se acumula el resultado.
+      const correlativos = masivoObjetivo.map((row) => Number(row.gasto.id)).filter((id) => id > 0);
+      const resultado: ActualizacionMasivaResponse = { idLote: "", solicitados: 0, actualizados: 0, errores: [] };
+      const lotes: string[] = [];
+      for (let i = 0; i < correlativos.length; i += BLOQUE_ACTUALIZACION_MASIVA) {
+        const parcial = await httpClient.post<ActualizacionMasivaResponse>(
+          `${GASTOS_API_URL}/actualizar-masivo`,
+          {
+            correlativos: correlativos.slice(i, i + BLOQUE_ACTUALIZACION_MASIVA),
+            serie: masivoSerie.trim() || undefined,
+            fecEmision: masivoFecEmision || undefined,
+            fechaPagoCre: masivoFechaPagoCre || undefined,
+            facturaPath: masivoFactura?.path || undefined,
+            motivo: masivoMotivo.trim(),
+          },
+          { timeout: 120000 }
+        );
+        resultado.solicitados += parcial.solicitados;
+        resultado.actualizados += parcial.actualizados;
+        resultado.errores.push(...parcial.errores);
+        lotes.push(parcial.idLote);
+        resultado.idLote = lotes.join(", ");
+      }
       setMasivoResultado(resultado);
       // Refresca la grilla con los mismos filtros para ver los valores nuevos.
       void handleBuscarGastos();

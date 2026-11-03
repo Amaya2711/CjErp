@@ -12,6 +12,8 @@ import {
 } from "../../api/compensacionService";
 import { listarEmpleadosWup } from "../../api/empleadoService";
 import CrudToolbar from "../../components/base/CrudToolbar";
+import DataGridPro from "../../components/datagrid/DataGridPro";
+import type { GridColumn } from "../../components/datagrid/types";
 import { useCrudForm } from "../../hooks/useCrudForm";
 import type {
   CompensacionAccion,
@@ -103,29 +105,34 @@ const DEFAULT_HIDDEN_ESTADOS = new Set([-1, 9]);
 
 type ActivoFilter = "activos" | "todos" | "inactivos";
 type ActiveTab = "solicitudes" | "resumen";
-type SortDirection = "asc" | "desc";
-type SortColumn =
-  | "id"
-  | "empleado"
-  | "primer"
-  | "segundo"
-  | "inicio"
-  | "fin"
-  | "estado"
-  | "base"
-  | "ganados"
-  | "tomados"
-  | "pendientes"
-  | "disponibles"
-  | "uso"
-  | "acciones";
-type SummarySortColumn =
-  | "empleado"
-  | "base"
-  | "ganados"
-  | "tomados"
-  | "pendientes"
-  | "disponibles";
+
+/** Fila plana del grid de solicitudes: cada columna trae su valor listo para ordenar, filtrar y agrupar. */
+type SolicitudGridRow = {
+  item: CompensacionRow;
+  rowKey: string;
+  idEmpleadoCj: number | null;
+  empleado: string;
+  primer: string;
+  segundo: string;
+  fechaInicio: string;
+  fechaFin: string;
+  estado: string;
+  diasBase: number;
+  diasGanados: number;
+  diasTomados: number;
+  diasPendientes: number;
+};
+
+type SaldoGridRow = {
+  rowKey: string;
+  idEmpleadoCj: number | null;
+  empleado: string;
+  diasBase: number;
+  diasGanados: number;
+  diasTomados: number;
+  diasPendientes: number;
+  diasDisponibles: number;
+};
 
 type EmployeeOption = {
   value: string;
@@ -460,20 +467,6 @@ export default function CompensacionRealPage() {
   const [procesandoAccion, setProcesandoAccion] = useState(false);
   const [estadoDropdownOpen, setEstadoDropdownOpen] = useState(false);
   const estadoDropdownRef = useRef<HTMLDivElement | null>(null);
-  const [sortConfig, setSortConfig] = useState<{
-    column: SortColumn;
-    direction: SortDirection;
-  }>({
-    column: "estado",
-    direction: "asc",
-  });
-  const [summarySortConfig, setSummarySortConfig] = useState<{
-    column: SummarySortColumn;
-    direction: SortDirection;
-  }>({
-    column: "empleado",
-    direction: "asc",
-  });
 
   const api = useMemo(
     () => ({
@@ -833,44 +826,33 @@ export default function CompensacionRealPage() {
       }));
   }, [filteredSaldos]);
 
-  const sortedSummarySaldos = useMemo(() => {
-    const getSummarySortValue = (item: CompensacionSaldo): string | number => {
-      switch (summarySortConfig.column) {
-        case "empleado":
-          return String(item.nombreEmpleado || "").toLowerCase();
-        case "base":
-          return item.diasBase;
-        case "ganados":
-          return item.diasGanados;
-        case "tomados":
-          return item.diasTomados;
-        case "pendientes":
-          return item.diasPendientes;
-        case "disponibles":
-          return item.diasBase + item.diasGanados - item.diasTomados;
-        default:
-          return "";
-      }
-    };
+  const saldosGridRows = useMemo<SaldoGridRow[]>(
+    () =>
+      filteredSaldos.map((item) => ({
+        rowKey: `saldo-${item.idEmpleadoCj ?? item.nombreEmpleado}`,
+        idEmpleadoCj: item.idEmpleadoCj ?? null,
+        empleado: item.nombreEmpleado || "",
+        diasBase: item.diasBase,
+        diasGanados: item.diasGanados,
+        diasTomados: item.diasTomados,
+        diasPendientes: item.diasPendientes,
+        diasDisponibles: item.diasBase + item.diasGanados - item.diasTomados,
+      })),
+    [filteredSaldos]
+  );
 
-    return [...filteredSaldos].sort((a, b) => {
-      const left = getSummarySortValue(a);
-      const right = getSummarySortValue(b);
+  const saldosGridColumns: GridColumn<SaldoGridRow>[] = [
+    { dataField: "idEmpleadoCj", caption: "Id empleado", dataType: "number", width: 110 },
+    { dataField: "empleado", caption: "Empleado", width: 280, sortOrder: "asc" },
+    { dataField: "diasBase", caption: "Días base", dataType: "number", width: 110, format: { type: "fixedPoint", precision: 2 } },
+    { dataField: "diasGanados", caption: "Días ganados", dataType: "number", width: 120, format: { type: "fixedPoint", precision: 2 } },
+    { dataField: "diasTomados", caption: "Días tomados", dataType: "number", width: 120, format: { type: "fixedPoint", precision: 2 } },
+    { dataField: "diasPendientes", caption: "Días pendientes", dataType: "number", width: 130, format: { type: "fixedPoint", precision: 2 } },
+    { dataField: "diasDisponibles", caption: "Días disponibles", dataType: "number", width: 130, format: { type: "fixedPoint", precision: 2 } },
+  ];
 
-      let result = 0;
-      if (typeof left === "number" && typeof right === "number") {
-        result = left - right;
-      } else {
-        result = String(left).localeCompare(String(right), "es", {
-          sensitivity: "base",
-          numeric: true,
-        });
-      }
-
-      return summarySortConfig.direction === "asc" ? result : -result;
-    });
-  }, [filteredSaldos, summarySortConfig]);
-
+  // Orden base: los registros con IdEstado = 9 al final (por fecha) y el resto por nombre de estado.
+  // Luego el usuario puede reordenar, filtrar o agrupar desde el propio grid.
   const sortedItems = useMemo(() => {
     const getEstadoLabel = (item: CompensacionRow) =>
       String(item.estado || item.idEstado || "").toLowerCase();
@@ -880,126 +862,154 @@ export default function CompensacionRealPage() {
       return value ? Date.parse(value) || 0 : 0;
     };
 
-    const getSortValue = (item: CompensacionRow): string | number => {
-      switch (sortConfig.column) {
-        case "id":
-          return item.idEmpleadoCj ?? -1;
-        case "empleado":
-          return getEmpleadoLabel(employeeById, item).toLowerCase();
-        case "primer":
-          return (item.primer || "").toLowerCase();
-        case "segundo":
-          return (item.segundo || "").toLowerCase();
-        case "inicio": {
-          const value = toDateInput(item.fechaInicio || "");
-          return value ? Date.parse(value) || 0 : 0;
-        }
-        case "fin": {
-          const value = toDateInput(item.fechaFin || "");
-          return value ? Date.parse(value) || 0 : 0;
-        }
-        case "estado":
-          return String(item.estado || item.idEstado || "").toLowerCase();
-        case "base":
-          return item.diasBase;
-        case "ganados":
-          return item.diasGanados;
-        case "tomados":
-          return item.diasTomados;
-        case "pendientes":
-          return item.diasPendientes;
-        case "disponibles":
-          return item.diasBase + item.diasGanados - item.diasTomados;
-        case "uso":
-          return item.porcentajeUso;
-        case "acciones":
-          return item.idEmpleadoCompensacion;
-        default:
-          return "";
-      }
-    };
-
     return [...filteredItems].sort((a, b) => {
       const leftEstado9 = (a.idEstado ?? 0) === 9;
       const rightEstado9 = (b.idEstado ?? 0) === 9;
 
-      // Siempre enviar al final los registros con IdEstado = 9.
       if (leftEstado9 !== rightEstado9) {
         return leftEstado9 ? 1 : -1;
       }
 
-      // Dentro de IdEstado = 9, ordenar por fecha.
       if (leftEstado9 && rightEstado9) {
         return getOrderDateValue(a) - getOrderDateValue(b);
       }
 
-      // Para el resto, ordenar primero por nombre de estado.
-      const estadoCompare = getEstadoLabel(a).localeCompare(getEstadoLabel(b), "es", {
+      return getEstadoLabel(a).localeCompare(getEstadoLabel(b), "es", {
         sensitivity: "base",
         numeric: true,
       });
-      if (estadoCompare !== 0) {
-        return estadoCompare;
-      }
-
-      const left = getSortValue(a);
-      const right = getSortValue(b);
-
-      let result = 0;
-      if (typeof left === "number" && typeof right === "number") {
-        result = left - right;
-      } else {
-        result = String(left).localeCompare(String(right), "es", {
-          sensitivity: "base",
-          numeric: true,
-        });
-      }
-
-      return sortConfig.direction === "asc" ? result : -result;
     });
-  }, [employeeById, filteredItems, sortConfig]);
+  }, [filteredItems]);
 
-  const toggleSort = (column: SortColumn) => {
-    setSortConfig((current) => {
-      if (current.column === column) {
-        return {
-          column,
-          direction: current.direction === "asc" ? "desc" : "asc",
-        };
-      }
+  const solicitudesGridRows = useMemo<SolicitudGridRow[]>(
+    () =>
+      sortedItems.map((item) => ({
+        item,
+        rowKey:
+          item.idEmpleadoCompensacion > 0
+            ? `${item.idEmpleadoCompensacion}-${item.idEmpleadoCj ?? "sin-empleado"}-${item.fechaInicio ?? ""}-${item.fechaFin ?? ""}-${item.usuario ?? ""}`
+            : `${item.idEmpleadoCj ?? "sin-empleado"}-${item.fechaInicio ?? ""}-${item.fechaFin ?? ""}-${item.usuario ?? ""}`,
+        idEmpleadoCj: item.idEmpleadoCj ?? null,
+        empleado: getEmpleadoLabel(employeeById, item),
+        primer: item.primer || "",
+        segundo: item.segundo || "",
+        fechaInicio: toDateInput(item.fechaInicio || ""),
+        fechaFin: toDateInput(item.fechaFin || ""),
+        estado: String(item.estado || item.idEstado || ""),
+        diasBase: item.diasBase,
+        diasGanados: item.diasGanados,
+        diasTomados: item.diasTomados,
+        diasPendientes: item.diasPendientes,
+      })),
+    [employeeById, sortedItems]
+  );
 
-      return {
-        column,
-        direction: "asc",
-      };
-    });
-  };
+  const solicitudesGridColumns: GridColumn<SolicitudGridRow>[] = [
+    { dataField: "idEmpleadoCj", caption: "Id", dataType: "number", width: 80, fixed: true },
+    { dataField: "empleado", caption: "Empleado", width: 260, fixed: true },
+    { dataField: "primer", caption: "Primer", width: 150 },
+    { dataField: "segundo", caption: "Segundo", width: 150 },
+    { dataField: "fechaInicio", caption: "Inicio", dataType: "date", width: 110 },
+    { dataField: "fechaFin", caption: "Fin", dataType: "date", width: 110 },
+    { dataField: "estado", caption: "Estado", width: 130 },
+    { dataField: "diasBase", caption: "DiasBase", dataType: "number", width: 100, format: { type: "fixedPoint", precision: 2 } },
+    { dataField: "diasGanados", caption: "Ganados", dataType: "number", width: 100, format: { type: "fixedPoint", precision: 2 } },
+    { dataField: "diasTomados", caption: "Tomados", dataType: "number", width: 100, format: { type: "fixedPoint", precision: 2 } },
+    { dataField: "diasPendientes", caption: "Pendientes", dataType: "number", width: 110, format: { type: "fixedPoint", precision: 2 } },
+    {
+      dataField: "acciones",
+      caption: "Acciones",
+      width: 400,
+      allowSorting: false,
+      allowFiltering: false,
+      allowGrouping: false,
+      allowHeaderFilter: false,
+      allowSearch: false,
+      calculateCellValue: () => "",
+      cellRender: (_value, gridRow) => {
+        const item = gridRow.item;
+        const itemEstado = Number(item.idEstado ?? 0);
+        const isEstadoInvalidoRechazo = itemEstado === -1;
+        const isEstadoBloqueado = itemEstado === 9;
+        const isEstadoRechazado = itemEstado === 22;
+        const canUseFirstApproverByEstado = itemEstado === 97;
+        const canUseSecondApproverByEstado = itemEstado === 98;
+        const hasRoleOverride = currentRoleCode === 5 || currentRoleCode === 4;
+        const isFirstApproverOwner =
+          currentEmployeeId > 0 && toNumber(item.idResponsableCj) === currentEmployeeId;
+        const isSecondApproverOwner =
+          currentEmployeeId > 0 && toNumber(item.idSegundoVacaciones) === currentEmployeeId;
+        const disableFirstApproverButton =
+          saving ||
+          detailLoading ||
+          isEstadoBloqueado ||
+          isEstadoRechazado ||
+          !canUseFirstApproverByEstado ||
+          (!hasRoleOverride && !isFirstApproverOwner);
+        const disableSecondApproverButton =
+          saving ||
+          detailLoading ||
+          isEstadoBloqueado ||
+          isEstadoRechazado ||
+          !canUseSecondApproverByEstado ||
+          (!hasRoleOverride && !isSecondApproverOwner);
+        const disableEditButton =
+          saving || detailLoading || isEstadoBloqueado || isEstadoRechazado;
+        const disableRejectButton = disableEditButton || isEstadoInvalidoRechazo;
 
-  const getSortIndicator = (column: SortColumn) => {
-    if (sortConfig.column !== column) return "<>";
-    return sortConfig.direction === "asc" ? "^" : "v";
-  };
-
-  const toggleSummarySort = (column: SummarySortColumn) => {
-    setSummarySortConfig((current) => {
-      if (current.column === column) {
-        return {
-          column,
-          direction: current.direction === "asc" ? "desc" : "asc",
-        };
-      }
-
-      return {
-        column,
-        direction: "asc",
-      };
-    });
-  };
-
-  const getSummarySortIndicator = (column: SummarySortColumn) => {
-    if (summarySortConfig.column !== column) return "<>";
-    return summarySortConfig.direction === "asc" ? "^" : "v";
-  };
+        return (
+          <div style={styles.actions}>
+            <button
+              type="button"
+              style={{
+                ...styles.secondaryButton,
+                ...(disableFirstApproverButton ? styles.secondaryButtonDisabled : {}),
+              }}
+              onClick={() => handleOpenProcesar("PRIMER_APROBADOR", item)}
+              disabled={disableFirstApproverButton}
+            >
+              1er aprobador
+            </button>
+            <button
+              type="button"
+              style={{
+                ...styles.secondaryButton,
+                ...(disableSecondApproverButton ? styles.secondaryButtonDisabled : {}),
+              }}
+              onClick={() => handleOpenProcesar("SEGUNDO_APROBADOR", item)}
+              disabled={disableSecondApproverButton}
+            >
+              2do aprobador
+            </button>
+            {SHOW_EDIT_BUTTON ? (
+              <button
+                type="button"
+                style={{
+                  ...styles.secondaryButton,
+                  ...(disableEditButton ? styles.secondaryButtonDisabled : {}),
+                }}
+                onClick={() => handleOpenEdit(item)}
+                disabled={disableEditButton}
+              >
+                Editar
+              </button>
+            ) : null}
+            <button
+              type="button"
+              style={{
+                ...styles.dangerButton,
+                ...(disableRejectButton ? styles.secondaryButtonDisabled : {}),
+              }}
+              onClick={() => handleOpenProcesar("RECHAZAR", item)}
+              disabled={disableRejectButton}
+            >
+              Rechazar
+            </button>
+          </div>
+        );
+      },
+    },
+  ];
 
   const recargarSaldos = async () => {
     try {
@@ -1280,241 +1290,24 @@ export default function CompensacionRealPage() {
             ) : null}
           </div>
 
-          <div style={styles.tableWrap}>
-            <table style={styles.table}>
-              <thead>
-                <tr>
-                  <th style={styles.stickyIdTh}>
-                    <button type="button" style={styles.sortButton} onClick={() => toggleSort("id")}>
-                      Id <span style={styles.sortIcon}>{getSortIndicator("id")}</span>
-                    </button>
-                  </th>
-                  <th style={styles.stickyEmpleadoTh}>
-                    <button
-                      type="button"
-                      style={styles.sortButton}
-                      onClick={() => toggleSort("empleado")}
-                    >
-                      Empleado <span style={styles.sortIcon}>{getSortIndicator("empleado")}</span>
-                    </button>
-                  </th>
-                  <th style={styles.th}>
-                    <button
-                      type="button"
-                      style={styles.sortButton}
-                      onClick={() => toggleSort("primer")}
-                    >
-                      Primer <span style={styles.sortIcon}>{getSortIndicator("primer")}</span>
-                    </button>
-                  </th>
-                  <th style={styles.th}>
-                    <button
-                      type="button"
-                      style={styles.sortButton}
-                      onClick={() => toggleSort("segundo")}
-                    >
-                      Segundo <span style={styles.sortIcon}>{getSortIndicator("segundo")}</span>
-                    </button>
-                  </th>
-                  <th style={styles.th}>
-                    <button
-                      type="button"
-                      style={styles.sortButton}
-                      onClick={() => toggleSort("inicio")}
-                    >
-                      Inicio <span style={styles.sortIcon}>{getSortIndicator("inicio")}</span>
-                    </button>
-                  </th>
-                  <th style={styles.th}>
-                    <button type="button" style={styles.sortButton} onClick={() => toggleSort("fin")}>
-                      Fin <span style={styles.sortIcon}>{getSortIndicator("fin")}</span>
-                    </button>
-                  </th>
-                  <th style={styles.th}>
-                    <button
-                      type="button"
-                      style={styles.sortButton}
-                      onClick={() => toggleSort("estado")}
-                    >
-                      Estado <span style={styles.sortIcon}>{getSortIndicator("estado")}</span>
-                    </button>
-                  </th>
-                  <th style={styles.th}>
-                    <button
-                      type="button"
-                      style={styles.sortButton}
-                      onClick={() => toggleSort("base")}
-                    >
-                      DiasBase <span style={styles.sortIcon}>{getSortIndicator("base")}</span>
-                    </button>
-                  </th>
-                  <th style={styles.th}>
-                    <button
-                      type="button"
-                      style={styles.sortButton}
-                      onClick={() => toggleSort("ganados")}
-                    >
-                      Ganados <span style={styles.sortIcon}>{getSortIndicator("ganados")}</span>
-                    </button>
-                  </th>
-                  <th style={styles.th}>
-                    <button
-                      type="button"
-                      style={styles.sortButton}
-                      onClick={() => toggleSort("tomados")}
-                    >
-                      Tomados <span style={styles.sortIcon}>{getSortIndicator("tomados")}</span>
-                    </button>
-                  </th>
-                  <th style={styles.th}>
-                    <button
-                      type="button"
-                      style={styles.sortButton}
-                      onClick={() => toggleSort("pendientes")}
-                    >
-                      Pendientes <span style={styles.sortIcon}>{getSortIndicator("pendientes")}</span>
-                    </button>
-                  </th>
-                  <th style={styles.th}>
-                    <button
-                      type="button"
-                      style={styles.sortButton}
-                      onClick={() => toggleSort("acciones")}
-                    >
-                      Acciones <span style={styles.sortIcon}>{getSortIndicator("acciones")}</span>
-                    </button>
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {loading ? (
-                  <tr>
-                    <td colSpan={12} style={styles.emptyCell}>
-                      Cargando registros...
-                    </td>
-                  </tr>
-                ) : filteredItems.length === 0 ? (
-                  <tr>
-                    <td colSpan={12} style={styles.emptyCell}>
-                      No hay registros para los filtros seleccionados.
-                    </td>
-                  </tr>
-                ) : (
-                  sortedItems.map((item) => {
-                    const itemEstado = Number(item.idEstado ?? 0);
-                    const isEstadoInvalidoRechazo = itemEstado === -1;
-                    const isEstadoBloqueado = itemEstado === 9;
-                    const isEstadoRechazado = itemEstado === 22;
-                    const canUseFirstApproverByEstado = itemEstado === 97;
-                    const canUseSecondApproverByEstado = itemEstado === 98;
-                    const hasRoleOverride = currentRoleCode === 5 || currentRoleCode === 4;
-                    const isFirstApproverOwner =
-                      currentEmployeeId > 0 && toNumber(item.idResponsableCj) === currentEmployeeId;
-                    const isSecondApproverOwner =
-                      currentEmployeeId > 0 && toNumber(item.idSegundoVacaciones) === currentEmployeeId;
-                    const disableFirstApproverButton =
-                      saving ||
-                      detailLoading ||
-                      isEstadoBloqueado ||
-                      isEstadoRechazado ||
-                      !canUseFirstApproverByEstado ||
-                      (!hasRoleOverride && !isFirstApproverOwner);
-                    const disableSecondApproverButton =
-                      saving ||
-                      detailLoading ||
-                      isEstadoBloqueado ||
-                      isEstadoRechazado ||
-                      !canUseSecondApproverByEstado ||
-                      (!hasRoleOverride && !isSecondApproverOwner);
-                    const disableEditButton =
-                      saving ||
-                      detailLoading ||
-                      isEstadoBloqueado ||
-                      isEstadoRechazado;
-                    const disableRejectButton =
-                      disableEditButton || isEstadoInvalidoRechazo;
-
-                    return (
-                      <tr
-                        key={
-                          item.idEmpleadoCompensacion > 0
-                            ? `${item.idEmpleadoCompensacion}-${item.idEmpleadoCj ?? "sin-empleado"}-${item.fechaInicio ?? ""}-${item.fechaFin ?? ""}-${item.usuario ?? ""}`
-                            : `${item.idEmpleadoCj ?? "sin-empleado"}-${item.fechaInicio ?? ""}-${item.fechaFin ?? ""}-${item.usuario ?? ""}`
-                        }
-                      >
-                      <td style={styles.stickyIdTd}>{item.idEmpleadoCj ?? "-"}</td>
-                      <td style={styles.stickyEmpleadoTd}>
-                        <div style={styles.cellPrimary}>{getEmpleadoLabel(employeeById, item)}</div>
-                      </td>
-                      <td style={styles.td}>{item.primer || "-"}</td>
-                      <td style={styles.td}>{item.segundo || "-"}</td>
-                      <td style={styles.td}>{formatDateCell(item.fechaInicio)}</td>
-                      <td style={styles.td}>{formatDateCell(item.fechaFin)}</td>
-                      <td style={styles.td}>{item.estado || item.idEstado || "-"}</td>
-                      <td style={styles.td}>{formatDecimal(item.diasBase)}</td>
-                      <td style={styles.td}>{formatDecimal(item.diasGanados)}</td>
-                      <td style={styles.td}>{formatDecimal(item.diasTomados)}</td>
-                      <td style={styles.td}>{formatDecimal(item.diasPendientes)}</td>
-                      <td style={styles.td}>
-                        <div style={styles.actions}>
-                          <button
-                            type="button"
-                            style={{
-                              ...styles.secondaryButton,
-                              ...(disableFirstApproverButton ? styles.secondaryButtonDisabled : {}),
-                            }}
-                            onClick={() => handleOpenProcesar("PRIMER_APROBADOR", item)}
-                            disabled={disableFirstApproverButton}
-                          >
-                            1er aprobador
-                          </button>
-                          <button
-                            type="button"
-                            style={{
-                              ...styles.secondaryButton,
-                              ...(disableSecondApproverButton ? styles.secondaryButtonDisabled : {}),
-                            }}
-                            onClick={() => handleOpenProcesar("SEGUNDO_APROBADOR", item)}
-                            disabled={disableSecondApproverButton}
-                          >
-                            2do aprobador
-                          </button>
-                          {SHOW_EDIT_BUTTON ? (
-                            <button
-                              type="button"
-                              style={{
-                                ...styles.secondaryButton,
-                                ...(disableEditButton ? styles.secondaryButtonDisabled : {}),
-                              }}
-                              onClick={() => handleOpenEdit(item)}
-                              disabled={disableEditButton}
-                            >
-                              Editar
-                            </button>
-                          ) : null}
-                          <button
-                            type="button"
-                            style={{
-                              ...styles.dangerButton,
-                              ...(disableRejectButton ? styles.secondaryButtonDisabled : {}),
-                            }}
-                            onClick={() => handleOpenProcesar("RECHAZAR", item)}
-                            disabled={disableRejectButton}
-                          >
-                            Rechazar
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                    );
-                  })
-                )}
-              </tbody>
-            </table>
-          </div>
+          <DataGridPro<SolicitudGridRow>
+            dataSource={solicitudesGridRows}
+            columns={solicitudesGridColumns}
+            keyExpr="rowKey"
+            height="fill"
+            loading={loading}
+            noDataText="No hay registros para los filtros seleccionados."
+            stateStoringKey="compensacion-solicitudes"
+            showSearchPanel={false}
+            allowExport={false}
+            autoExpandAll={false}
+            rowAlternation={false}
+            rowPadding="4px 8px"
+            paging={{ pageSize: 50, pageSizes: [20, 50, 100, 250] }}
+          />
         </div>
       ) : (
-        <div style={styles.tableCard}>
+        <div style={{ ...styles.tableCard, overflowY: "auto" }}>
           <div style={styles.cardHeader}>
             <div>
               <strong>Resumen de compensaciones pendientes</strong>
@@ -1639,105 +1432,21 @@ export default function CompensacionRealPage() {
             </div>
 
           <div style={styles.summaryTableCard}>
-            <div style={styles.summarySortBar}>
-              <span style={styles.summarySortLabel}>Ordenar detalle por:</span>
-              <button
-                type="button"
-                style={styles.summarySortButton}
-                onClick={() => toggleSummarySort("empleado")}
-              >
-                Empleado <span style={styles.sortIcon}>{getSummarySortIndicator("empleado")}</span>
-              </button>
-              <button
-                type="button"
-                style={styles.summarySortButton}
-                onClick={() => toggleSummarySort("base")}
-              >
-                Dias base <span style={styles.sortIcon}>{getSummarySortIndicator("base")}</span>
-              </button>
-              <button
-                type="button"
-                style={styles.summarySortButton}
-                onClick={() => toggleSummarySort("ganados")}
-              >
-                Dias ganados <span style={styles.sortIcon}>{getSummarySortIndicator("ganados")}</span>
-              </button>
-              <button
-                type="button"
-                style={styles.summarySortButton}
-                onClick={() => toggleSummarySort("tomados")}
-              >
-                Dias tomados <span style={styles.sortIcon}>{getSummarySortIndicator("tomados")}</span>
-              </button>
-              <button
-                type="button"
-                style={styles.summarySortButton}
-                onClick={() => toggleSummarySort("pendientes")}
-              >
-                Dias pendientes <span style={styles.sortIcon}>{getSummarySortIndicator("pendientes")}</span>
-              </button>
-              <button
-                type="button"
-                style={styles.summarySortButton}
-                onClick={() => toggleSummarySort("disponibles")}
-              >
-                Dias disponibles <span style={styles.sortIcon}>{getSummarySortIndicator("disponibles")}</span>
-              </button>
-            </div>
-            <div style={styles.summaryTableWrap}>
-            <table style={styles.summaryTable}>
-              <thead>
-                <tr>
-                  <th style={styles.th}>Id empleado</th>
-                  <th style={styles.th}>
-                    <button
-                      type="button"
-                      style={styles.sortButton}
-                      onClick={() => toggleSummarySort("empleado")}
-                    >
-                      Empleado <span style={styles.sortIcon}>{getSummarySortIndicator("empleado")}</span>
-                    </button>
-                  </th>
-                  <th style={styles.th}>Días base</th>
-                  <th style={styles.th}>Días ganados</th>
-                  <th style={styles.th}>Días tomados</th>
-                  <th style={styles.th}>Días pendientes</th>
-                  <th style={styles.th}>Días disponibles</th>
-                </tr>
-              </thead>
-              <tbody>
-                {saldosLoading ? (
-                  <tr>
-                    <td colSpan={7} style={styles.emptyCell}>
-                      Cargando resumen...
-                    </td>
-                  </tr>
-                ) : filteredSaldos.length === 0 ? (
-                  <tr>
-                    <td colSpan={7} style={styles.emptyCell}>
-                      No hay saldos para los filtros actuales.
-                    </td>
-                  </tr>
-                ) : (
-                  sortedSummarySaldos.map((item) => (
-                    <tr key={`saldo-${item.idEmpleadoCj ?? item.nombreEmpleado}`}>
-                      <td style={styles.td}>{item.idEmpleadoCj ?? "-"}</td>
-                      <td style={styles.td}>
-                        <div style={styles.cellPrimary}>{item.nombreEmpleado || "-"}</div>
-                      </td>
-                      <td style={styles.td}>{formatDecimal(item.diasBase)}</td>
-                      <td style={styles.td}>{formatDecimal(item.diasGanados)}</td>
-                      <td style={styles.td}>{formatDecimal(item.diasTomados)}</td>
-                      <td style={styles.td}>{formatDecimal(item.diasPendientes)}</td>
-                      <td style={styles.td}>
-                        {formatDecimal(item.diasBase + item.diasGanados - item.diasTomados)}
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-            </div>
+            <DataGridPro<SaldoGridRow>
+              dataSource={saldosGridRows}
+              columns={saldosGridColumns}
+              keyExpr="rowKey"
+              height={420}
+              loading={saldosLoading}
+              noDataText="No hay saldos para los filtros actuales."
+              stateStoringKey="compensacion-resumen"
+              showSearchPanel={false}
+              allowExport={false}
+              autoExpandAll={false}
+              rowAlternation={false}
+              rowPadding="4px 8px"
+              paging={{ pageSize: 50, pageSizes: [20, 50, 100, 250] }}
+            />
           </div>
           </div>
         </div>

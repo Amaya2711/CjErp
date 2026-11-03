@@ -3,6 +3,8 @@ export type AiVisualizationType = "none" | "table" | "bar" | "line" | "pie" | "k
 export type AiChatRequest = {
   message: string;
   conversationId?: string;
+  /** GUID por petición: reenviar el MISMO valor al reintentar evita mensajes duplicados. */
+  clientMessageId?: string;
 };
 
 export type AiChatResponse = {
@@ -17,7 +19,8 @@ export type AiChatResponse = {
 
 export type AiConversation = {
   idConversacion: string;
-  idUsuario: number;
+  /** Nombre de usuario (dbo.Usuario.IdUsuario), texto. */
+  idUsuario: string;
   titulo: string | null;
   fechaCreacion: string;
   fechaUltimoMensaje: string;

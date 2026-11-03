@@ -27,9 +27,9 @@ export const reportesWhatsappService = {
   },
 
   /** PDF que enviaría el job (sin enviarlo): primer empleado destino con datos, o el indicado. */
-  async vistaPreviaPdf(tipo?: string, idEmpleado?: number) {
+  async vistaPreviaPdf(tipo?: string, idEmpleado?: number, anio?: number, mes?: number) {
     return await httpClient.get<Blob>(`${BASE_URL}/vista-previa-pdf`, {
-      params: { ...(tipo ? { tipo } : {}), ...(idEmpleado ? { idEmpleado } : {}) },
+      params: { ...(tipo ? { tipo } : {}), ...(idEmpleado ? { idEmpleado } : {}), ...(anio && mes ? { anio, mes } : {}) },
       responseType: "blob",
       timeout: 120000,
     });

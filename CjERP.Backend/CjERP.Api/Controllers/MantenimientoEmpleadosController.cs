@@ -1509,6 +1509,7 @@ public class MantenimientoEmpleadosController : ControllerBase
             var idEmpleadoLegacy = await EnsureLegacyEmpleadoAsync(connection, empleado, transaction, cancellationToken);
             await EnsureUsuarioEmpleadoAsync(connection, empleado, idEmpleadoLegacy, transaction, cancellationToken);
             await GenerarAsistenciaAprobacionAsync(connection, empleado, idAprobador, transaction, cancellationToken);
+            await AsegurarIdEmpRelAsync(connection, empleado.IdEmpleado, idEmpleadoLegacy, transaction, cancellationToken);
 
             await transaction.CommitAsync(cancellationToken);
         }
@@ -1865,6 +1866,34 @@ public class MantenimientoEmpleadosController : ControllerBase
 
         await SyncEmpleadoCjLegacyRelationAsync(connection, empleado.IdEmpleado, nuevoIdLegacy, transaction, cancellationToken);
         return nuevoIdLegacy;
+    }
+
+    private static async Task AsegurarIdEmpRelAsync(
+        SqlConnection connection,
+        int idEmpleadoCj,
+        int idEmpleadoLegacy,
+        SqlTransaction transaction,
+        CancellationToken cancellationToken)
+    {
+        await connection.ExecuteAsync(
+            new CommandDefinition(
+                "UPDATE dbo.EmpleadoCj SET IdEmpRel = @IdEmpleadoLegacy WHERE IdEmpleado = @IdEmpleadoCj;",
+                new { IdEmpleadoCj = idEmpleadoCj, IdEmpleadoLegacy = idEmpleadoLegacy },
+                transaction: transaction,
+                cancellationToken: cancellationToken));
+
+        var idEmpRelGuardado = await connection.ExecuteScalarAsync<int?>(
+            new CommandDefinition(
+                "SELECT IdEmpRel FROM dbo.EmpleadoCj WHERE IdEmpleado = @IdEmpleadoCj;",
+                new { IdEmpleadoCj = idEmpleadoCj },
+                transaction: transaction,
+                cancellationToken: cancellationToken));
+
+        if (idEmpRelGuardado != idEmpleadoLegacy)
+        {
+            throw new InvalidOperationException(
+                $"No se pudo enlazar EmpleadoCj.IdEmpRel con Empleado.IdEmpleado {idEmpleadoLegacy}.");
+        }
     }
 
     private static async Task SyncEmpleadoCjLegacyRelationAsync(

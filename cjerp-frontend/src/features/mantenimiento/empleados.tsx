@@ -8,6 +8,8 @@ import CrudToolbar, {
   type CrudToolbarSearchField,
 } from "../../components/base/CrudToolbar";
 import SidePanelForm from "../../components/base/SidePanelForm";
+import DataGridPro from "../../components/datagrid/DataGridPro";
+import type { GridColumn } from "../../components/datagrid/types";
 import {
   empleadosCrudService,
   type CrudLookupItem,
@@ -45,22 +47,25 @@ type EmployeeOrganizationFilters = {
   area: string;
   ubicacion: string;
 };
-type EmployeeSortDirection = "asc" | "desc";
-type EmployeeSortKey =
-  | "idEmpleado"
-  | "nombreEmpleado"
-  | "empresa"
-  | "cliente"
-  | "area"
-  | "ubicacion"
-  | "responsable"
-  | "soValidador"
-  | "terValidador"
-  | "fechaIniLaboral"
-  | "fechaFinLaboral"
-  | "nroDocumento"
-  | "estado"
-  | "idUsuario";
+
+/** Fila plana del grid de empleados: cada columna trae su valor listo para ordenar, filtrar y agrupar. */
+type EmpleadoGridRow = {
+  item: EmpleadoCrudItem;
+  idEmpleado: number;
+  nombreEmpleado: string;
+  empresa: string;
+  cliente: string;
+  area: string;
+  ubicacion: string;
+  responsable: string;
+  soValidador: string;
+  terValidador: string;
+  fechaIniLaboral: string;
+  fechaFinLaboral: string;
+  nroDocumento: string;
+  estado: string;
+  idUsuario: string;
+};
 
 type OrganizacionCampo = "empresa" | "cliente" | "area" | "ubicacion";
 type ValidadorCampo = "responsable" | "segundaValidacion" | "terceraValidacion";
@@ -112,11 +117,6 @@ const camposEditablesEnGrilla: Record<CampoEditableEnGrilla, CampoEditableEnGril
 };
 
 const EMPLEADO_CARGO_ID = 50;
-
-const employeeColumnWidths = [
-  "72px", "290px", "180px", "180px", "170px", "170px", "250px",
-  "220px", "220px", "125px", "125px", "120px", "130px", "150px", "270px",
-] as const;
 
 const initialForm: EmpleadoForm = {
   id: null,
@@ -394,67 +394,6 @@ function matchesOrganizationFilter(
   return values.some((value) => acceptedValues.has(value));
 }
 
-function EmployeeTableColumns() {
-  return (
-    <colgroup>
-      {employeeColumnWidths.map((width, index) => (
-        <col key={index} style={{ width }} />
-      ))}
-    </colgroup>
-  );
-}
-
-const employeeSortableColumns: Array<{ key: EmployeeSortKey; label: string }> = [
-  { key: "idEmpleado", label: "Id" },
-  { key: "nombreEmpleado", label: "Empleado" },
-  { key: "empresa", label: "Empresa" },
-  { key: "cliente", label: "Cliente" },
-  { key: "area", label: "Area" },
-  { key: "ubicacion", label: "Ubicacion" },
-  { key: "responsable", label: "Responsable" },
-  { key: "soValidador", label: "2da validación" },
-  { key: "terValidador", label: "3era validación" },
-  { key: "fechaIniLaboral", label: "Inicio" },
-  { key: "fechaFinLaboral", label: "Fin" },
-  { key: "nroDocumento", label: "Documento" },
-  { key: "estado", label: "Estado" },
-  { key: "idUsuario", label: "Usuario" },
-];
-
-function EmployeeTableHeader({
-  sortKey,
-  sortDirection,
-  onSort,
-}: {
-  sortKey: EmployeeSortKey | null;
-  sortDirection: EmployeeSortDirection;
-  onSort: (key: EmployeeSortKey) => void;
-}) {
-  return (
-    <thead>
-      <tr>
-        {employeeSortableColumns.map((column) => {
-          const isActive = sortKey === column.key;
-          const directionLabel = isActive && sortDirection === "asc" ? "ascendente" : "descendente";
-          return (
-            <th key={column.key} style={styles.th} aria-sort={isActive ? sortDirection === "asc" ? "ascending" : "descending" : "none"}>
-              <button
-                type="button"
-                onClick={() => onSort(column.key)}
-                title={`Ordenar por ${column.label} ${directionLabel}`}
-                style={styles.sortHeaderButton}
-              >
-                {column.label} {isActive ? (sortDirection === "asc" ? "▲" : "▼") : "↕"}
-              </button>
-            </th>
-          );
-        })}
-        <th style={styles.th}>Acciones</th>
-      </tr>
-    </thead>
-  );
-}
-
 function getEstadoLabel(idEstado: number | null | undefined): string {
   if (idEstado === 9) {
     return "PENDIENTE";
@@ -516,8 +455,6 @@ export default function MantenimientoEmpleadosPage() {
   const [search, setSearch] = useState("");
   const [activeTab, setActiveTab] = useState<EmpleadoTab>("todos");
   const [organizationFilters, setOrganizationFilters] = useState<EmployeeOrganizationFilters>(initialOrganizationFilters);
-  const [sortKey, setSortKey] = useState<EmployeeSortKey | null>(null);
-  const [sortDirection, setSortDirection] = useState<EmployeeSortDirection>("asc");
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [updatingOrganizationField, setUpdatingOrganizationField] = useState<string | null>(null);
@@ -550,8 +487,6 @@ export default function MantenimientoEmpleadosPage() {
   const areaWrapRef = useRef<HTMLDivElement | null>(null);
   const responsableWrapRef = useRef<HTMLDivElement | null>(null);
   const segundoValidadorWrapRef = useRef<HTMLDivElement | null>(null);
-  const tableScrollRef = useRef<HTMLDivElement | null>(null);
-  const tableHeaderScrollRef = useRef<HTMLDivElement | null>(null);
 
   const searchFields = useMemo<CrudToolbarSearchField<EmpleadoCrudItem>[]>(
     () => [
@@ -581,40 +516,6 @@ export default function MantenimientoEmpleadosPage() {
       ),
     [activeTab, areas, clientes, empresas, items, organizationFilters, search, searchFields, ubicaciones]
   );
-
-  const sortedItems = useMemo(() => {
-    if (!sortKey) {
-      return filteredItems;
-    }
-
-    const direction = sortDirection === "asc" ? 1 : -1;
-    return [...filteredItems].sort((left, right) => {
-      const leftValue = sortKey === "estado" ? getEstadoNormalizado(left) : left[sortKey];
-      const rightValue = sortKey === "estado" ? getEstadoNormalizado(right) : right[sortKey];
-      const leftNumber = Number(leftValue);
-      const rightNumber = Number(rightValue);
-
-      if (leftValue != null && rightValue != null && String(leftValue).trim() !== "" && String(rightValue).trim() !== ""
-        && Number.isFinite(leftNumber) && Number.isFinite(rightNumber)) {
-        return (leftNumber - rightNumber) * direction;
-      }
-
-      return String(leftValue ?? "").localeCompare(String(rightValue ?? ""), "es", {
-        numeric: true,
-        sensitivity: "base",
-      }) * direction;
-    });
-  }, [filteredItems, sortDirection, sortKey]);
-
-  const handleSort = (key: EmployeeSortKey) => {
-    if (sortKey === key) {
-      setSortDirection((current) => current === "asc" ? "desc" : "asc");
-      return;
-    }
-
-    setSortKey(key);
-    setSortDirection("asc");
-  };
 
   const tabCounts = useMemo(
     () => ({
@@ -654,27 +555,6 @@ export default function MantenimientoEmpleadosPage() {
     }),
     [areas, clientes, empresas, items, organizationFilters, search, searchFields, ubicaciones]
   );
-
-  useEffect(() => {
-    const tableEl = tableScrollRef.current;
-    const headerEl = tableHeaderScrollRef.current;
-
-    if (!tableEl || !headerEl) {
-      return;
-    }
-
-    const syncFromTable = () => {
-      headerEl.scrollLeft = tableEl.scrollLeft;
-    };
-
-    tableEl.addEventListener("scroll", syncFromTable, { passive: true });
-
-    headerEl.scrollLeft = tableEl.scrollLeft;
-
-    return () => {
-      tableEl.removeEventListener("scroll", syncFromTable);
-    };
-  }, [filteredItems.length]);
 
   const loadEmployees = async (nombreEmpleado = search) => {
     setLoading(true);
@@ -1033,6 +913,134 @@ export default function MantenimientoEmpleadosPage() {
     );
   };
 
+  const gridRows = useMemo<EmpleadoGridRow[]>(
+    () =>
+      filteredItems.map((item) => ({
+        item,
+        idEmpleado: item.idEmpleado,
+        nombreEmpleado: item.nombreEmpleado || "",
+        empresa: item.empresa || "",
+        cliente: item.cliente || "",
+        area: item.area || "",
+        ubicacion: item.ubicacion || "",
+        responsable: item.responsable || "",
+        soValidador: item.soValidador || "",
+        terValidador: item.terValidador || "",
+        fechaIniLaboral: formatDateValue(item.fechaIniLaboral),
+        fechaFinLaboral: formatDateValue(item.fechaFinLaboral),
+        nroDocumento: item.nroDocumento || "",
+        estado: item.estado || getEstadoLabel(item.idEstado),
+        idUsuario: item.idUsuario || "",
+      })),
+    [filteredItems]
+  );
+
+  const gridColumns: GridColumn<EmpleadoGridRow>[] = [
+    { dataField: "idEmpleado", caption: "Id", dataType: "number", width: 80, fixed: true },
+    { dataField: "nombreEmpleado", caption: "Empleado", width: 290, fixed: true },
+    {
+      dataField: "empresa",
+      caption: "Empresa",
+      width: 180,
+      cellRender: (_value, row) => renderOrganizationSelect(row.item, "empresa", empresas),
+    },
+    {
+      dataField: "cliente",
+      caption: "Cliente",
+      width: 180,
+      cellRender: (_value, row) => renderOrganizationSelect(row.item, "cliente", clientes),
+    },
+    {
+      dataField: "area",
+      caption: "Area",
+      width: 170,
+      cellRender: (_value, row) => renderOrganizationSelect(row.item, "area", areas),
+    },
+    {
+      dataField: "ubicacion",
+      caption: "Ubicacion",
+      width: 170,
+      cellRender: (_value, row) => renderOrganizationSelect(row.item, "ubicacion", ubicaciones),
+    },
+    {
+      dataField: "responsable",
+      caption: "Responsable",
+      width: 250,
+      cellRender: (_value, row) => renderOrganizationSelect(row.item, "responsable", responsables),
+    },
+    {
+      dataField: "soValidador",
+      caption: "2da validación",
+      width: 220,
+      cellRender: (_value, row) =>
+        renderOrganizationSelect(row.item, "segundaValidacion", segundoValidadores),
+    },
+    {
+      dataField: "terValidador",
+      caption: "3era validación",
+      width: 220,
+      cellRender: (_value, row) =>
+        renderOrganizationSelect(row.item, "terceraValidacion", tercerValidadores),
+    },
+    { dataField: "fechaIniLaboral", caption: "Inicio", width: 125 },
+    { dataField: "fechaFinLaboral", caption: "Fin", width: 125 },
+    { dataField: "nroDocumento", caption: "Documento", width: 120 },
+    { dataField: "estado", caption: "Estado", width: 130 },
+    { dataField: "idUsuario", caption: "Usuario", width: 150 },
+    {
+      dataField: "acciones",
+      caption: "Acciones",
+      width: 290,
+      allowSorting: false,
+      allowFiltering: false,
+      allowGrouping: false,
+      allowHeaderFilter: false,
+      allowSearch: false,
+      calculateCellValue: () => "",
+      cellRender: (_value, row) => {
+        const item = row.item;
+        return (
+          <div style={styles.actionsTd}>
+            <button
+              type="button"
+              style={{
+                ...styles.approveButton,
+                ...(!canApproveEmpleado(item, activeTab) || approvingId === item.idEmpleado
+                  ? styles.disabledApproveButton
+                  : {}),
+              }}
+              onClick={() => setApproveItem(item)}
+              disabled={!canApproveEmpleado(item, activeTab) || approvingId === item.idEmpleado}
+              title={canApproveEmpleado(item, activeTab) ? "Aprobar empleado" : "Solo disponible para pendientes"}
+            >
+              {approvingId === item.idEmpleado ? "Aprobando..." : "Aprobar"}
+            </button>
+            <button type="button" style={styles.secondaryButton} onClick={() => openEdit(item)}>
+              Editar
+            </button>
+            <button
+              type="button"
+              style={{
+                ...styles.dangerButton,
+                ...(canDeleteEmpleado(activeTab) ? {} : styles.disabledApproveButton),
+              }}
+              onClick={() => {
+                if (!canDeleteEmpleado(activeTab)) {
+                  return;
+                }
+                setDeleteItem(item);
+              }}
+              disabled={!canDeleteEmpleado(activeTab)}
+              title={canDeleteEmpleado(activeTab) ? "Dar baja empleado" : "No disponible en Pendientes"}
+            >
+              Dar baja
+            </button>
+          </div>
+        );
+      },
+    },
+  ];
+
   return (
     <AppPage
       title=""
@@ -1157,92 +1165,24 @@ export default function MantenimientoEmpleadosPage() {
             <div style={styles.counter}>{filteredItems.length} registro(s)</div>
           </div>
 
-          <div style={styles.tableShell}>
-            <div ref={tableHeaderScrollRef} style={styles.tableHeaderWrapper}>
-              <table style={styles.table}>
-                <EmployeeTableColumns />
-                <EmployeeTableHeader sortKey={sortKey} sortDirection={sortDirection} onSort={handleSort} />
-              </table>
-            </div>
-            <div ref={tableScrollRef} style={styles.tableWrapper}>
-              <table style={styles.table}>
-                <EmployeeTableColumns />
-                <tbody>
-                  {sortedItems.length === 0 ? (
-                    <tr>
-                      <td colSpan={15} style={styles.emptyCell}>
-                        No se encontraron empleados.
-                      </td>
-                    </tr>
-                  ) : (
-                    sortedItems.map((item) => (
-                      <tr
-                        key={item.idEmpleado}
-                        style={getEstadoNormalizado(item).includes("PENDIENTE") ? styles.pendingRow : undefined}
-                      >
-                        <td style={styles.td}>{item.idEmpleado}</td>
-                        <td style={styles.tdBold} title={item.nombreEmpleado}>
-                          <span style={styles.truncatedCellText}>{item.nombreEmpleado}</span>
-                        </td>
-                        <td style={styles.td}>{renderOrganizationSelect(item, "empresa", empresas)}</td>
-                        <td style={styles.td}>{renderOrganizationSelect(item, "cliente", clientes)}</td>
-                        <td style={styles.td}>{renderOrganizationSelect(item, "area", areas)}</td>
-                        <td style={styles.td}>{renderOrganizationSelect(item, "ubicacion", ubicaciones)}</td>
-                        <td style={styles.td}>{renderOrganizationSelect(item, "responsable", responsables)}</td>
-                        <td style={styles.td}>
-                          {renderOrganizationSelect(item, "segundaValidacion", segundoValidadores)}
-                        </td>
-                        <td style={styles.td}>
-                          {renderOrganizationSelect(item, "terceraValidacion", tercerValidadores)}
-                        </td>
-                        <td style={styles.td}>{formatDateValue(item.fechaIniLaboral)}</td>
-                        <td style={styles.td}>{formatDateValue(item.fechaFinLaboral)}</td>
-                        <td style={styles.td}>{item.nroDocumento || "-"}</td>
-                        <td style={styles.estadoCell}>{item.estado || getEstadoLabel(item.idEstado)}</td>
-                        <td style={styles.usuarioCell}>{item.idUsuario || "-"}</td>
-                        <td style={styles.actionsTd}>
-                          <button
-                            type="button"
-                            style={{
-                              ...styles.approveButton,
-                              ...(!canApproveEmpleado(item, activeTab) || approvingId === item.idEmpleado
-                                ? styles.disabledApproveButton
-                                : {}),
-                            }}
-                            onClick={() => setApproveItem(item)}
-                            disabled={!canApproveEmpleado(item, activeTab) || approvingId === item.idEmpleado}
-                            title={canApproveEmpleado(item, activeTab) ? "Aprobar empleado" : "Solo disponible para pendientes"}
-                          >
-                            {approvingId === item.idEmpleado ? "Aprobando..." : "Aprobar"}
-                          </button>
-                          <button type="button" style={styles.secondaryButton} onClick={() => openEdit(item)}>
-                            Editar
-                          </button>
-                          <button
-                            type="button"
-                            style={{
-                              ...styles.dangerButton,
-                              ...(canDeleteEmpleado(activeTab) ? {} : styles.disabledApproveButton),
-                            }}
-                            onClick={() => {
-                              if (!canDeleteEmpleado(activeTab)) {
-                                return;
-                              }
-                              setDeleteItem(item);
-                            }}
-                            disabled={!canDeleteEmpleado(activeTab)}
-                            title={canDeleteEmpleado(activeTab) ? "Dar baja empleado" : "No disponible en Pendientes"}
-                          >
-                            Dar baja
-                          </button>
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
+          <DataGridPro<EmpleadoGridRow>
+            dataSource={gridRows}
+            columns={gridColumns}
+            keyExpr={(row) => String(row.idEmpleado)}
+            height="60vh"
+            loading={loading}
+            noDataText="No se encontraron empleados."
+            stateStoringKey="mantenimiento-empleados"
+            showSearchPanel={false}
+            allowExport={false}
+            autoExpandAll={false}
+            rowAlternation={false}
+            rowPadding="4px 8px"
+            rowStyle={(row) =>
+              getEstadoNormalizado(row.item).includes("PENDIENTE") ? styles.pendingRow : undefined
+            }
+            paging={{ pageSize: 50, pageSizes: [20, 50, 100, 250] }}
+          />
         </div>
       </AppCard>
       </div>

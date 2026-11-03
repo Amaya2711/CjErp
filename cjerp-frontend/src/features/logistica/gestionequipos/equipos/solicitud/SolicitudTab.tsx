@@ -21,25 +21,6 @@ type Origen = "Listado" | "Consumible" | "Adicional";
 
 type FilaDisponible = SolicitudDisponible & { cantSol: number };
 type FilaConsumible = SolicitudConsumible & { cantSol: number };
-/** Fila del Listado: líneas del mismo pedido y material agrupadas (como el sistema antiguo). */
-type FilaGrupo = {
-  clave: string;
-  pedidoSap: string;
-  codPap: string;
-  nombreMaterial: string;
-  unidadMedida: string;
-  serie: string;
-  cantPedido: number;
-  utilizado: number;
-  saldo: number;
-  cantSol: number;
-  idSite: string;
-  nombreSite: string;
-  nombreCliente: string;
-  nombreProyecto: string;
-  tipoTrabajo: string;
-  lineas: SolicitudDisponible[];
-};
 /** Línea elegida para la solicitud (de cualquiera de las vistas). */
 type Elegida = {
   clave: string;
@@ -204,7 +185,12 @@ export default function SolicitudTab() {
     });
 
   const cambiarLinea = (fila: SolicitudDisponible, valor: unknown, fuente: Origen) => {
-    const cantidad = validarCantidad(valor, fila.saldo);
+    if (fuente === "Listado" && fila.idEstado !== 2) {
+      setError("Solo se pueden solicitar equipos en estado 2 (validado).");
+      return;
+    }
+    // Tope efectivo: lo que queda de la línea y el stock disponible del material (como el sistema antiguo).
+    const cantidad = validarCantidad(valor, Math.min(fila.saldo, fila.stockDisponible));
     if (cantidad === null) return;
     guardarElegida({
       clave: fila.correlativo,
@@ -293,73 +279,10 @@ export default function SolicitudTab() {
     }
   };
 
-  const gruposListado = useMemo<FilaGrupo[]>(() => {
-    const grupos = new Map<string, FilaGrupo>();
-    for (const d of listado) {
-      const clave = `${d.pedidoSap ?? ""}|${d.codPap}`;
-      let g = grupos.get(clave);
-      if (!g) {
-        g = {
-          clave,
-          pedidoSap: d.pedidoSap ?? "",
-          codPap: d.codPap,
-          nombreMaterial: d.nombreMaterial ?? "",
-          unidadMedida: d.unidadMedida ?? "",
-          serie: d.serie ?? "",
-          cantPedido: 0,
-          utilizado: 0,
-          saldo: 0,
-          cantSol: 0,
-          idSite: d.idSite ?? "",
-          nombreSite: d.nombreSite ?? "",
-          nombreCliente: d.nombreCliente ?? "",
-          nombreProyecto: d.nombreProyecto ?? "",
-          tipoTrabajo: d.tipoTrabajo ?? "",
-          lineas: [],
-        };
-        grupos.set(clave, g);
-      } else if (g.serie !== (d.serie ?? "")) {
-        g.serie = "(varias)";
-      }
-      g.cantPedido += d.cantSap;
-      g.saldo += d.saldo;
-      g.cantSol += elegidas[d.correlativo]?.cantidad ?? 0;
-      g.lineas.push(d);
-    }
-    grupos.forEach((g) => {
-      g.utilizado = g.cantPedido - g.saldo;
-    });
-    return Array.from(grupos.values());
-  }, [listado, elegidas]);
-
-  /** La cantidad pedida a un grupo se reparte entre sus líneas en orden (cada línea hasta su saldo). */
-  const cambiarGrupo = (grupo: FilaGrupo, valor: unknown) => {
-    const cantidad = validarCantidad(valor, grupo.saldo);
-    if (cantidad === null) return;
-    setElegidas((actuales) => {
-      const siguiente = { ...actuales };
-      let resto = cantidad;
-      for (const fila of grupo.lineas) {
-        delete siguiente[fila.correlativo];
-        const toma = Math.min(resto, fila.saldo);
-        if (toma <= 0) continue;
-        resto -= toma;
-        siguiente[fila.correlativo] = {
-          clave: fila.correlativo,
-          correlativo: fila.correlativo,
-          codPap: fila.codPap,
-          material: fila.nombreMaterial ?? "",
-          serie: fila.serie ?? "",
-          origen: fila.nombreSite ?? fila.idSite ?? "",
-          fuente: "Listado",
-          idSite: fila.idSite ?? "",
-          correSite: fila.correSite ?? null,
-          cantidad: toma,
-        };
-      }
-      return siguiente;
-    });
-  };
+  const filasListado = useMemo<FilaDisponible[]>(
+    () => listado.map((d) => ({ ...d, cantSol: elegidas[d.correlativo]?.cantidad ?? 0 })),
+    [listado, elegidas],
+  );
   const filasAdicional = useMemo<FilaDisponible[]>(
     () => adicional.map((d) => ({ ...d, cantSol: elegidas[d.correlativo]?.cantidad ?? 0 })),
     [adicional, elegidas],
@@ -394,7 +317,8 @@ export default function SolicitudTab() {
     ],
     [],
   );
-  const columnasGrupo = useMemo<GridColumn<FilaGrupo>[]>(
+  /** Listado como el sistema antiguo: una fila por línea; Saldo = stock disponible, Utilizado = stock − disponible. */
+  const columnasListado = useMemo<GridColumn<FilaDisponible>[]>(
     () => [
       {
         dataField: "cantSol",
@@ -411,9 +335,22 @@ export default function SolicitudTab() {
       { dataField: "codPap", caption: "Código", width: 110 },
       { dataField: "nombreMaterial", caption: "Material", width: 300 },
       { dataField: "unidadMedida", caption: "UM", width: 60 },
-      { dataField: "cantPedido", caption: "Cant. pedido", dataType: "number", width: 110 },
+      { dataField: "cantSap", caption: "Cant. pedido", dataType: "number", width: 110 },
       { dataField: "utilizado", caption: "Utilizado", dataType: "number", width: 90 },
-      { dataField: "saldo", caption: "Saldo", dataType: "number", width: 90 },
+      {
+        dataField: "stockDisponible",
+        caption: "Saldo",
+        dataType: "number",
+        width: 100,
+        cellStyle: (v) => (Number(v) < 0 ? { background: "#FED7AA" } : Number(v) === 0 ? { background: "#F0E68C" } : {}),
+      },
+      { dataField: "saldo", caption: "Saldo línea", dataType: "number", width: 100 },
+      {
+        dataField: "nomEstado",
+        caption: "Est. val.",
+        width: 150,
+        cellStyle: (_v, fila) => (fila?.idEstado !== 2 ? { color: "#B91C1C", fontWeight: 600 } : {}),
+      },
       { dataField: "serie", caption: "Serie", width: 140 },
       { dataField: "nombreCliente", caption: "Cliente", width: 140 },
       { dataField: "nombreProyecto", caption: "Proyecto", width: 160 },
@@ -525,27 +462,27 @@ export default function SolicitudTab() {
           <>
             <div style={styles.toolbar}>
               <span style={styles.resumen}>
-                Equipos del site agrupados por pedido y material: {gruposListado.length}. Escriba la cantidad en cada fila.
+                Equipos del site: {filasListado.length}. Escriba la cantidad en cada fila (solo estado 2).
               </span>
               <button type="button" onClick={() => sitio && void cargarListado(sitio)} disabled={cargando || !sitio} style={styles.secondary}>
                 Actualizar
               </button>
             </div>
             <div style={{ height: 380, display: "flex", flexDirection: "column" }}>
-              <DataGridPro<FilaGrupo>
-                dataSource={gruposListado}
-                columns={columnasGrupo}
-                keyExpr="clave"
+              <DataGridPro<FilaDisponible>
+                dataSource={filasListado}
+                columns={columnasListado}
+                keyExpr="correlativo"
                 height="fill"
                 loading={cargando}
-                noDataText="El site no tiene equipos validados con saldo."
-                stateStoringKey="logistica-solicitud-listado"
+                noDataText="El site no tiene equipos en estado 2 o 3."
+                stateStoringKey="logistica-solicitud-listado-v2"
                 editing={{
                   allowUpdating: true,
                   onCellChanged: ({ key, field, value }) => {
                     if (field !== "cantSol") return;
-                    const grupo = gruposListado.find((g) => g.clave === key);
-                    if (grupo) cambiarGrupo(grupo, value);
+                    const fila = filasListado.find((d) => d.correlativo === key);
+                    if (fila) cambiarLinea(fila, value, "Listado");
                   },
                 }}
                 showSearchPanel={false}

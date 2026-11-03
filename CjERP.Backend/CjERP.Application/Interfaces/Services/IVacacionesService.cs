@@ -14,6 +14,11 @@ public interface IVacacionesService
         string usuarioAccion,
         CancellationToken cancellationToken = default);
 
+    Task<VacacionesGrabarResultDto> ModificarFechasAsync(
+        VacacionesModificarFechasRequestDto request,
+        string usuarioAccion,
+        CancellationToken cancellationToken = default);
+
     Task<VacacionesGrabarResultDto> AprobarAsync(
         VacacionesAprobarRequestDto request,
         string usuarioAccion,

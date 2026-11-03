@@ -30,6 +30,8 @@
 .ai-suggestion-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }
 .ai-suggestion-grid button { padding: 12px; text-align: left; border: 1px solid #cce0de; border-radius: 11px; background: rgba(255,255,255,.8); color: #275859; cursor: pointer; }
 .ai-suggestion-grid button:hover, .ai-suggestion-grid button:focus-visible { border-color: #0f766e; background: #fff; outline: none; box-shadow: 0 0 0 3px rgba(15,118,110,.12); }
+.ai-suggestion-grid button:disabled { display: flex; flex-direction: column; gap: 5px; align-items: flex-start; cursor: not-allowed; opacity: .6; background: rgba(238,242,242,.8); color: #5f7b7c; box-shadow: none; border-color: #dbe6e5; }
+.ai-suggestion-badge { padding: 1px 8px; border-radius: 999px; background: #fdecc8; color: #8a5a00; font-size: 11px; font-weight: 600; }
 .ai-message { display: flex; gap: 11px; max-width: 850px; margin: 0 auto 18px; }
 .ai-message.user { flex-direction: row-reverse; }
 .ai-avatar { flex: 0 0 34px; display: grid; place-items: center; width: 34px; height: 34px; border-radius: 11px; color: #fff; background: #176c68; }
@@ -58,3 +60,4 @@
 .ai-empty-state { padding: 50px 20px; text-align: center; color: #176c68; }.ai-empty-state h2 { margin: 14px 0 6px; color: #123c3d; }.ai-empty-state p { margin: 0; color: #648080; }
 .ai-mobile-toolbar, .ai-mobile-only { display: none; }
 @media (max-width: 800px) { .ai-page-shell { position: relative; min-height: 560px; border-radius: 16px; }.ai-sidebar { position: absolute; inset: 0 auto 0 0; z-index: 10; transform: translateX(-105%); transition: transform .2s ease; box-shadow: 15px 0 35px rgba(0,0,0,.2); }.ai-sidebar.is-open { transform: translateX(0); }.ai-mobile-only, .ai-mobile-toolbar { display: inline-flex; }.ai-mobile-toolbar { align-items: center; gap: 8px; margin-bottom: 12px; color: #527574; font-size: 12px; font-weight: 700; }.ai-icon-button { align-items: center; justify-content: center; padding: 7px; border-radius: 8px; color: inherit; background: transparent; }.ai-icon-button:hover { background: rgba(255,255,255,.12); }.ai-chat-panel { padding: 17px 14px 14px; }.ai-hero { flex-direction: column; }.ai-hero .ai-outline-button { display: none; }.ai-suggestion-grid { grid-template-columns: 1fr; }.ai-message-body { max-width: 86%; }.ai-composer-wrap { grid-template-columns: 1fr; }.ai-send-button { justify-content: center; }.ai-sidebar-note { margin-top: 12px; } }
+.ai-reading { background: #f5a623; color: #173638; border-radius: 3px; padding: 0 1px; }

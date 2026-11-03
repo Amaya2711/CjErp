@@ -265,6 +265,7 @@ export default function AppRouter() {
             <Route path="/reporte/administrativo/iachat" element={<IaChatPage />} />
             <Route path="/reportes/administrativo/iachat" element={<IaChatPage />} />
             <Route path="/cj-intelligence" element={<CjIntelligencePage />} />
+            <Route path="/cj-intelligence/CjIntelligencePage" element={<CjIntelligencePage />} />
             <Route path="/cj-intelligence/knowledge" element={<KnowledgePage />} />
             <Route path="/reporte/financiero" element={<FinancieroPage />} />
             <Route path="/reporte/gerencial" element={<GerencialPage />} />

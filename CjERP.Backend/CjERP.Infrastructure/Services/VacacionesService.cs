@@ -114,6 +114,201 @@ public sealed class VacacionesService : IVacacionesService
         };
     }
 
+    public async Task<VacacionesGrabarResultDto> ModificarFechasAsync(
+        VacacionesModificarFechasRequestDto request,
+        string usuarioAccion,
+        CancellationToken cancellationToken = default)
+    {
+        ValidarModificacionFechasRequest(request);
+
+        var fechaInicio = request.FechaInicio.Date;
+        var fechaFin = request.FechaFin.Date;
+        var nuevaInicio = request.NuevaFechaInicio.Date;
+        var nuevaFin = request.NuevaFechaFin.Date;
+        var diasNuevos = (nuevaFin - nuevaInicio).Days + 1;
+
+        await using var connection = _sqlCommandFactory.CreateConnection();
+
+        // Solo se puede modificar mientras no esté aprobada al 100 % (97/98/99 = validaciones pendientes).
+        var estadoActual = await connection.QueryFirstOrDefaultAsync<int?>(
+            _sqlCommandFactory.Create(
+                @"SELECT TOP 1 IdEstado
+                  FROM dbo.EmpleadoOtros
+                  WHERE IdEmpleadoCj = @IdEmpleadoCj AND FechaInicio = @FechaInicio AND FechaFin = @FechaFin
+                    AND IdEstado IN (0, 97, 98, 99)
+                  ORDER BY IdEstado DESC",
+                new { request.IdEmpleadoCj, FechaInicio = fechaInicio, FechaFin = fechaFin },
+                CommandType.Text,
+                cancellationToken));
+
+        if (estadoActual is null or 0)
+        {
+            throw new InvalidOperationException(
+                "Solo se pueden modificar las fechas de solicitudes pendientes de validación (no aprobadas al 100 % ni rechazadas).");
+        }
+
+        // Otras solicitudes vigentes del empleado (excluye rechazadas y la que se modifica).
+        var otras = (await connection.QueryAsync<(DateTime FechaInicio, DateTime FechaFin, int IdEstado)>(
+            _sqlCommandFactory.Create(
+                @"SELECT DISTINCT CAST(FechaInicio AS date) AS FechaInicio, CAST(FechaFin AS date) AS FechaFin, IdEstado
+                  FROM dbo.EmpleadoOtros
+                  WHERE IdEmpleadoCj = @IdEmpleadoCj
+                    AND IdEstado IN (97, 98, 99, 4)
+                    AND NOT (FechaInicio = @FechaInicio AND FechaFin = @FechaFin)",
+                new { request.IdEmpleadoCj, FechaInicio = fechaInicio, FechaFin = fechaFin },
+                CommandType.Text,
+                cancellationToken))).ToList();
+
+        var cruce = otras.FirstOrDefault(o => o.FechaInicio <= nuevaFin && o.FechaFin >= nuevaInicio);
+        if (cruce != default)
+        {
+            throw new InvalidOperationException(
+                $"Las nuevas fechas se cruzan con otra solicitud del empleado ({cruce.FechaInicio:dd/MM/yyyy} al {cruce.FechaFin:dd/MM/yyyy}).");
+        }
+
+        // Saldo (SaldoVacaciones del listado legacy: calculado − tomadas) menos los días de las otras solicitudes pendientes.
+        var filasSaldo = await connection.QueryAsync(
+            _sqlCommandFactory.Create(
+                "dbo.sp_EmpleadoOtros_ListarVacaciones",
+                new { IdEmpleadoCj = request.IdEmpleadoCj },
+                CommandType.StoredProcedure,
+                cancellationToken,
+                commandTimeout: 120));
+
+        decimal? saldo = filasSaldo
+            .Select(f => ((IDictionary<string, object?>)f).TryGetValue("SaldoVacaciones", out var v) && v is not null
+                ? Convert.ToDecimal(v)
+                : (decimal?)null)
+            .FirstOrDefault(v => v is not null);
+
+        if (saldo is not null)
+        {
+            var diasPendientesOtras = otras
+                .Where(o => o.IdEstado is 97 or 98 or 99)
+                .Sum(o => (o.FechaFin - o.FechaInicio).Days + 1);
+            var disponible = saldo.Value - diasPendientesOtras;
+
+            if (diasNuevos > disponible)
+            {
+                throw new InvalidOperationException(
+                    $"Los días solicitados ({diasNuevos}) superan el saldo disponible ({disponible:0.##}): saldo {saldo.Value:0.##} menos {diasPendientesOtras} día(s) en otras solicitudes pendientes.");
+            }
+        }
+
+        // EmpleadoOtros guarda UNA FILA POR DÍA (Fecha). Además de cambiar FechaInicio/FechaFin hay que
+        // sincronizar los días: borrar los que quedan fuera del nuevo rango y crear los que faltan
+        // (copiando una fila de la solicitud). Si no, quedan días huérfanos en 97/98/99 que se ven como
+        // una solicitud pendiente aunque el resto ya esté aprobado. Todo en una transacción.
+        var filas = await connection.QueryFirstAsync<int>(
+            _sqlCommandFactory.Create(
+                @"SET XACT_ABORT ON;
+                  BEGIN TRAN;
+
+                  SELECT TOP 1 * INTO #tpl
+                  FROM dbo.EmpleadoOtros
+                  WHERE IdEmpleadoCj = @IdEmpleadoCj AND FechaInicio = @FechaInicio AND FechaFin = @FechaFin
+                    AND IdEstado IN (97, 98, 99)
+                  ORDER BY Fecha;
+
+                  -- Días del nuevo rango que aún no tienen fila en la solicitud
+                  SELECT DATEADD(DAY, n.i, @NuevaFechaInicio) AS Fecha
+                  INTO #dias
+                  FROM (SELECT TOP (DATEDIFF(DAY, @NuevaFechaInicio, @NuevaFechaFin) + 1)
+                               ROW_NUMBER() OVER (ORDER BY (SELECT NULL)) - 1 AS i
+                        FROM sys.all_objects) n
+                  WHERE NOT EXISTS (
+                      SELECT 1 FROM dbo.EmpleadoOtros x
+                      WHERE x.IdEmpleadoCj = @IdEmpleadoCj AND x.FechaInicio = @FechaInicio AND x.FechaFin = @FechaFin
+                        AND x.IdEstado IN (97, 98, 99)
+                        AND CAST(x.Fecha AS date) = DATEADD(DAY, n.i, @NuevaFechaInicio));
+
+                  DELETE FROM dbo.EmpleadoOtros
+                  WHERE IdEmpleadoCj = @IdEmpleadoCj AND FechaInicio = @FechaInicio AND FechaFin = @FechaFin
+                    AND IdEstado IN (97, 98, 99)
+                    AND CAST(Fecha AS date) NOT BETWEEN @NuevaFechaInicio AND @NuevaFechaFin;
+
+                  IF EXISTS (SELECT 1 FROM #dias) AND EXISTS (SELECT 1 FROM #tpl)
+                  BEGIN
+                      DECLARE @cols NVARCHAR(MAX), @sel NVARCHAR(MAX);
+                      SELECT @cols = STRING_AGG(CAST(QUOTENAME(name) AS NVARCHAR(MAX)), ',') WITHIN GROUP (ORDER BY column_id),
+                             @sel  = STRING_AGG(CAST(CASE WHEN name = 'Fecha' THEN 'd.Fecha' ELSE 't.' + QUOTENAME(name) END AS NVARCHAR(MAX)), ',') WITHIN GROUP (ORDER BY column_id)
+                      FROM sys.columns
+                      WHERE object_id = OBJECT_ID('dbo.EmpleadoOtros')
+                        AND is_identity = 0 AND is_computed = 0 AND system_type_id <> 189;
+
+                      EXEC (N'INSERT INTO dbo.EmpleadoOtros (' + @cols + N') SELECT ' + @sel + N' FROM #tpl t CROSS JOIN #dias d');
+                  END;
+
+                  UPDATE dbo.EmpleadoOtros
+                  SET FechaInicio = @NuevaFechaInicio, FechaFin = @NuevaFechaFin
+                  WHERE IdEmpleadoCj = @IdEmpleadoCj
+                    AND FechaInicio = @FechaInicio
+                    AND FechaFin = @FechaFin
+                    AND IdEstado IN (97, 98, 99);
+                  DECLARE @filas INT = @@ROWCOUNT;
+
+                  COMMIT;
+                  SELECT @filas;",
+                new
+                {
+                    request.IdEmpleadoCj,
+                    FechaInicio = fechaInicio,
+                    FechaFin = fechaFin,
+                    NuevaFechaInicio = nuevaInicio,
+                    NuevaFechaFin = nuevaFin
+                },
+                CommandType.Text,
+                cancellationToken,
+                commandTimeout: 120));
+
+        _logger.LogInformation(
+            "[Vacaciones] Modificación de fechas IdEmpleadoCj={IdEmpleadoCj} {FechaInicio:yyyy-MM-dd}/{FechaFin:yyyy-MM-dd} -> {NuevaInicio:yyyy-MM-dd}/{NuevaFin:yyyy-MM-dd} por {Usuario}. Filas={Filas}",
+            request.IdEmpleadoCj, fechaInicio, fechaFin, nuevaInicio, nuevaFin, NormalizeUsuario(usuarioAccion), filas);
+
+        return new VacacionesGrabarResultDto
+        {
+            Exito = filas > 0 ? 1 : 0,
+            Resultado = filas > 0 ? 1 : 0,
+            Mensaje = filas > 0
+                ? "Fechas de vacaciones modificadas correctamente."
+                : "No se encontró la solicitud pendiente para modificar.",
+            DiasSolicitados = diasNuevos,
+            DiasInsertados = filas
+        };
+    }
+
+    private static void ValidarModificacionFechasRequest(VacacionesModificarFechasRequestDto request)
+    {
+        ValidarRechazoRequest(new VacacionesRechazarRequestDto
+        {
+            IdEmpleadoCj = request.IdEmpleadoCj,
+            FechaInicio = request.FechaInicio,
+            FechaFin = request.FechaFin
+        });
+
+        if (request.NuevaFechaInicio == default || request.NuevaFechaFin == default)
+        {
+            throw new InvalidOperationException("Debe indicar las nuevas fechas de inicio y fin.");
+        }
+
+        if (request.NuevaFechaFin.Date < request.NuevaFechaInicio.Date)
+        {
+            throw new InvalidOperationException("La nueva fecha fin no puede ser menor que la nueva fecha inicio.");
+        }
+
+        var dias = (request.NuevaFechaFin.Date - request.NuevaFechaInicio.Date).Days + 1;
+        if (dias < MinDiasSolicitud)
+        {
+            throw new InvalidOperationException(
+                $"No se puede registrar menos de {MinDiasSolicitud} días de vacaciones (se solicitaron {dias}).");
+        }
+
+        if (request.NuevaFechaInicio.Date == request.FechaInicio.Date && request.NuevaFechaFin.Date == request.FechaFin.Date)
+        {
+            throw new InvalidOperationException("Las fechas indicadas son iguales a las actuales.");
+        }
+    }
+
     public async Task<VacacionesGrabarResultDto> AprobarAsync(
         VacacionesAprobarRequestDto request,
         string usuarioAccion,

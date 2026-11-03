@@ -32,6 +32,10 @@ public class LogisticaSolicitudDisponibleDto
     public string? NombreProyecto { get; set; }
     public bool MismoSite { get; set; }
     public decimal StockDisponible { get; set; }
+    /// <summary>Stock - Disponible del material (global), como el Listado antiguo.</summary>
+    public decimal Utilizado { get; set; }
+    public int? IdEstado { get; set; }
+    public string? NomEstado { get; set; }
 }
 
 /// <summary>Material consumible (cod. 30) con stock disponible, sin linea de origen.</summary>

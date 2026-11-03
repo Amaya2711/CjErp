@@ -1,3 +1,4 @@
+import { Download } from "lucide-react";
 import { Bar, BarChart, CartesianGrid, Cell, Line, LineChart, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import DataGridBase, { type DataGridColumn } from "../../../components/base/DataGridBase";
 import type { AiChatResponse } from "../types";
@@ -6,8 +7,26 @@ const colors = ["#0f766e", "#2563eb", "#f59e0b", "#dc2626", "#7c3aed"];
 const value = (item: Record<string, unknown>, key: string) => item[key];
 function display(input: unknown) { if (input === null || input === undefined || input === "") return "-"; if (typeof input === "number") return new Intl.NumberFormat("es-PE", { maximumFractionDigits: 2 }).format(input); return String(input); }
 
+async function exportarExcel(rows: Array<Record<string, unknown>>) {
+  const XLSX = await import("xlsx");
+  const sheet = XLSX.utils.json_to_sheet(rows);
+  const book = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(book, sheet, "Resumen");
+  const fecha = new Date().toISOString().slice(0, 10);
+  XLSX.writeFile(book, `cj_intelligence_resumen_${fecha}.xlsx`);
+}
+
 export default function AiResultVisual({ result }: { result: AiChatResponse }) {
   if (!result.data?.length) return null;
+  return <div>
+    <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 8 }}>
+      <button type="button" className="ai-outline-button" onClick={() => void exportarExcel(result.data)}><Download size={15} /> Exportar a Excel</button>
+    </div>
+    <ResultBody result={result} />
+  </div>;
+}
+
+function ResultBody({ result }: { result: AiChatResponse }) {
   const keys = Object.keys(result.data[0]);
   const columns: DataGridColumn<Record<string, unknown>>[] = keys.map((key) => ({ key, header: key, render: (row) => display(row[key]) }));
   const chartData = result.data.slice(0, 30);

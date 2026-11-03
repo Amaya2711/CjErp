@@ -1,22 +1,38 @@
+/* ============================================================
+   dbo.sp_OrdenCompra_Consulta_Estados
+   Consulta "analisis-gastos" (OC/Gastos de oc_v1 / oc_v2 y OcResumenPanel).
+
+   Sincronizado con el SP vigente en JC_Db (30/10/2026) + cambio:
+   las planillas con Estado = 3 (RECHAZADO) se excluyen de TODO el
+   bloque PLANILLA (cantidad, estados, responsable, solicitante,
+   moneda, montos y fechas), no solo de correlativos y montos.
+   Union Planilla <-> detalle OC: IdOc + Fila.
+   PV: ejecutar en BD tras comparar con el SP vigente (Script as ALTER).
+   ============================================================ */
 USE [JC_Db]
 GO
-
 SET ANSI_NULLS ON
 GO
-
 SET QUOTED_IDENTIFIER ON
 GO
 
-
-ALTER PROCEDURE [dbo].[sp_OrdenCompra_Consulta_Estados]
+CREATE OR ALTER PROCEDURE [dbo].[sp_OrdenCompra_Consulta_Estados]
 (
     @pProyecto      VARCHAR(200) = NULL,
     @Ano            INT = NULL,
     @Id             INT = NULL,
-    @IdResponsable  VARCHAR(MAX) = NULL,
+
+    /* PERMITE VARIOS: '4404,4405,4410' */
+    @IdResponsable  VARCHAR(500) = NULL,
+
+    /* PERMITE VARIOS: '1160,4404,5521' */
+    @IdSolicitante  VARCHAR(500) = NULL,
+
     @IdCliente      INT = NULL,
-    @IdProyecto     VARCHAR(MAX) = NULL,
-    @IdSolicitante  VARCHAR(MAX) = NULL,
+
+    /* PERMITE VARIOS: '79,82,91' */
+    @IdProyecto     VARCHAR(500) = NULL,
+
     @IdSite         VARCHAR(MAX) = NULL,
     @Estados        VARCHAR(200) = NULL,
     @FechaInicio    DATE = NULL,
@@ -27,13 +43,16 @@ BEGIN
 
     SET NOCOUNT ON;
 
-
     /* ============================================================
        NORMALIZACIÓN DE PARÁMETROS
        ============================================================ */
 
     SET @pProyecto = NULLIF(LTRIM(RTRIM(@pProyecto)), '');
-    SET @Estados   = NULLIF(LTRIM(RTRIM(@Estados)), '');
+    SET @Estados = NULLIF(LTRIM(RTRIM(@Estados)), '');
+    SET @IdResponsable = NULLIF(LTRIM(RTRIM(@IdResponsable)), '');
+    SET @IdSolicitante = NULLIF(LTRIM(RTRIM(@IdSolicitante)), '');
+    SET @IdProyecto = NULLIF(LTRIM(RTRIM(@IdProyecto)), '');
+    SET @IdSite = NULLIF(LTRIM(RTRIM(@IdSite)), '');
 
     IF @Ano = 0
         SET @Ano = NULL;
@@ -41,34 +60,8 @@ BEGIN
     IF @Id = 0
         SET @Id = NULL;
 
-    SET @IdResponsable = NULLIF(LTRIM(RTRIM(@IdResponsable)), '');
-
     IF @IdCliente = 0
         SET @IdCliente = NULL;
-
-    SET @IdProyecto = NULLIF(LTRIM(RTRIM(@IdProyecto)), '');
-    SET @IdSolicitante = NULLIF(LTRIM(RTRIM(@IdSolicitante)), '');
-
-    SET @IdSite = NULLIF(LTRIM(RTRIM(@IdSite)), '');
-
-    DECLARE @Responsables TABLE (IdResponsable INT NOT NULL PRIMARY KEY);
-    DECLARE @Proyectos TABLE (IdProyecto INT NOT NULL PRIMARY KEY);
-    DECLARE @Solicitantes TABLE (IdSolicitante INT NOT NULL PRIMARY KEY);
-
-    INSERT INTO @Responsables (IdResponsable)
-    SELECT DISTINCT TRY_CONVERT(INT, LTRIM(RTRIM(value)))
-    FROM STRING_SPLIT(ISNULL(@IdResponsable, ''), ',')
-    WHERE TRY_CONVERT(INT, LTRIM(RTRIM(value))) > 0;
-
-    INSERT INTO @Proyectos (IdProyecto)
-    SELECT DISTINCT TRY_CONVERT(INT, LTRIM(RTRIM(value)))
-    FROM STRING_SPLIT(ISNULL(@IdProyecto, ''), ',')
-    WHERE TRY_CONVERT(INT, LTRIM(RTRIM(value))) > 0;
-
-    INSERT INTO @Solicitantes (IdSolicitante)
-    SELECT DISTINCT TRY_CONVERT(INT, LTRIM(RTRIM(value)))
-    FROM STRING_SPLIT(ISNULL(@IdSolicitante, ''), ',')
-    WHERE TRY_CONVERT(INT, LTRIM(RTRIM(value))) > 0;
 
 
     /* ============================================================
@@ -77,382 +70,175 @@ BEGIN
 
     SELECT DISTINCT
 
-        /* ========================================================
-           CABORDENCOMPRA
-           ======================================================== */
-
+        /* CABORDENCOMPRA */
         a6.IdOc,
 
+        /* RESPONSABLE OC */
+        a6.IdResponsable AS IdResponsableOc,
+        RespOc.NombreEmpleado AS ResponsableOc,
+
+        /* SOLICITANTE OC
+           IdWeb = 1 -> EmpleadoCj ; IdWeb <> 1 / NULL -> Empleado */
         a6.IdSolicitante AS IdSolicitanteOc,
 
         CASE
-            WHEN ISNULL(a6.IdWeb, 0) = 1 THEN SolicitanteOcCj.NombreEmpleado
-            ELSE SolicitanteOc.NombreEmpleado
+            WHEN ISNULL(a6.IdWeb, 0) = 1
+                THEN SolOcCj.NombreEmpleado
+            ELSE
+                SolOcCjOld.NombreEmpleado
         END AS SolicitanteOc,
 
-        a6.IdResponsable AS IdResponsableOc,
-
-        RespOc.NombreEmpleado AS ResponsableOc,
-
+        /* VALIDADOR OC
+           IdWeb = 1 -> EmpleadoCj ; IdWeb <> 1 / NULL -> Empleado */
         a6.IdValidador AS IdValidadorOc,
 
-        a6.IdGestor AS IdGestorOc,
-
-        a6.IdComprobante AS IdComprobante,
-
         CASE
-            WHEN ISNULL(a6.IdWeb, 0) = 1 THEN ValidadorOcCj.NombreEmpleado
-            ELSE ValidadorOc.NombreEmpleado
+            WHEN ISNULL(a6.IdWeb, 0) = 1
+                THEN ValOcCj.NombreEmpleado
+            ELSE
+                ValOc.NombreEmpleado
         END AS ValidadorOc,
 
-        CASE
-            WHEN ISNULL(a6.IdWeb, 0) = 1 THEN Aprobador1OcCj.NombreEmpleado
-            ELSE Aprobador1Oc.NombreEmpleado
-        END AS ValidadorAprobador1Oc,
+        /* ID WEB */
+        ISNULL(a6.IdWeb, 0) AS IdWebOc,
 
-        CASE
-            WHEN ISNULL(a6.IdWeb, 0) = 1 THEN Aprobador2OcCj.NombreEmpleado
-            ELSE Aprobador2Oc.NombreEmpleado
-        END AS ValidadorAprobador2Oc,
-
-        CASE
-            WHEN ISNULL(a6.IdWeb, 0) = 1 THEN Aprobador3OcCj.NombreEmpleado
-            ELSE Aprobador3Oc.NombreEmpleado
-        END AS ValidadorAprobador3Oc,
-
-
-        /* ========================================================
-           MONEDA ORDEN DE COMPRA
-           ======================================================== */
-
+        /* MONEDA ORDEN DE COMPRA */
         a6.IdMoneda AS IdMonedaOc,
-
         MonedaOc.ValorIni AS MonedaOc,
 
-
-        /* ========================================================
-           MONTOS CABORDENCOMPRA
-           ======================================================== */
-
-        a6.Subtotal AS SubtotalOc,
+        /* MONTO DETALLE OC POR IDOC + FILA */
+        (ISNULL(a5.PrecioUnitario, 0) * ISNULL(a5.Cantidad, 0)) AS SubtotalOc,
 
         a6.Igv AS IgvOc,
-
         a6.Total AS TotalOc,
 
-
-        /* ========================================================
-           DETORDENCOMPRA
-           ======================================================== */
-
+        /* DETORDENCOMPRA */
         a5.IdCliente,
-
         cli.NombreCliente AS Cliente,
-
         a5.IdProyecto,
-
         pro.NombreProyecto,
-
         a5.IdSite,
-
         a5.Correlativo AS CorSite,
-
-        a5.Fila AS Fila,
-
-        a5.Detalle AS Detalle,
-
         st.NombreSite AS Site,
-
-        COALESCE(a5.FechaCreacion, a6.FechaCreacion) AS FechaOc,
-
-        a5.TipoTrabajo AS TipoTrabajo,
-
-        a5.IdTarea AS IdTarea,
-
-        TareaOc.ValorIni AS Tarea,
-
-        CtaEmp.IdCargo AS IdCargo,
-
-        CtaEmp.IdBanco AS IdBancoCta,
-
-        CtaEmp.Cuenta AS Cuenta,
-
-        CtaEmp.CuentaInter AS CuentaInter,
-
-        CtaEmp.NombreCta AS NombreCta,
-
-        BancoCta.ValorIni AS Banco,
-
-        ComprobanteOc.ValorIni AS Comprobante,
-
-        a5.PrecioUnitario AS PrecioUniOc,
-
-        a5.Cantidad AS CantOc,
-
+        a5.FechaCreacion AS FechaOc,
         a5.IdAprobador1,
-
         a5.IdAprobador2,
-
         a5.IdAprobador3,
 
-        CASE
-            WHEN ISNULL(a5.IdAprobador1, 0) > 0
-                THEN CONCAT('Registrado (', CONVERT(VARCHAR(20), a5.IdAprobador1), ')')
-            ELSE 'Pendiente'
-        END AS PrimeraValidacion,
-
-        CASE
-            WHEN ISNULL(a5.IdAprobador2, 0) > 0
-                THEN CONCAT('Registrado (', CONVERT(VARCHAR(20), a5.IdAprobador2), ')')
-            ELSE 'Pendiente'
-        END AS SegundaValidacion,
-
-        CASE
-            WHEN ISNULL(a5.IdAprobador3, 0) > 0
-                THEN CONCAT('Registrado (', CONVERT(VARCHAR(20), a5.IdAprobador3), ')')
-            ELSE 'Pendiente'
-        END AS TerceraValidacion,
-
-
-        /* ========================================================
-           ESTADO ORDEN COMPRA
-           ======================================================== */
-
+        /* ESTADO ORDEN COMPRA */
         a5.IdEstado AS IdEstadoOc,
 
         CASE
-            WHEN a5.IdEstado = 1 THEN 'APROBADO'
             WHEN a5.IdEstado = 6 THEN 'RECHAZADO'
-            WHEN a5.IdEstado IS NULL THEN 'SIN ESTADO'
-            ELSE 'PENDIENTE'
+            WHEN a5.IdAprobador3 > 0 THEN 'Aprobado'
+            WHEN a5.IdAprobador2 > 0 THEN 'En 3era Aprob.'
+            WHEN a5.IdAprobador1 > 0 THEN 'En 2da Aprob.'
+            WHEN a6.IdGestor > 0 THEN 'En 1era aprobacion'
+            ELSE 'en Pre Aprob.'
         END AS EstadoOc,
 
-
-        /* ========================================================
-           MONTO DETALLE OC
-           ======================================================== */
-
-        ISNULL(a5.PrecioUnitario, 0)
-        *
-        ISNULL(a5.Cantidad, 0)
-        AS MontoDetalleOc,
-
-
-        /* ========================================================
-           PLANILLA - EXISTENCIA
-           ======================================================== */
-
+        /* PLANILLA - EXISTENCIA */
         CASE
             WHEN ISNULL(pl.CantidadPlanillas, 0) > 0
                 THEN 1
             ELSE 0
         END AS TienePlanilla,
 
-        ISNULL(
-            pl.CantidadPlanillas,
-            0
-        ) AS CantidadPlanillas,
+        ISNULL(pl.CantidadPlanillas, 0) AS CantidadPlanillas,
 
+        /* PLANILLA - CORRELATIVOS
+           TODOS LOS ESTADOS EXCEPTO PLANILLA.ESTADO = 3 (RECHAZADO) */
+        plPagada.CorrelativoPlanilla,
 
-        /* ========================================================
-           PLANILLA - CORRELATIVOS
-           ======================================================== */
-
-        pl.CorrelativoPlanilla,
-
-
-        /* ========================================================
-           PLANILLA - ESTADO
-           ======================================================== */
-
+        /* PLANILLA - ESTADO */
         pl.IdEstadoPlanilla,
-
         pl.EstadoPlanilla,
+        ISNULL(pl.CantidadEstadosPlanilla, 0) AS CantidadEstadosPlanilla,
 
-        ISNULL(
-            pl.CantidadEstadosPlanilla,
-            0
-        ) AS CantidadEstadosPlanilla,
-
-
-        /* ========================================================
-           PLANILLA - RESPONSABLE
-           ======================================================== */
-
+        /* PLANILLA - RESPONSABLE */
         pl.IdResponsablePlanilla,
-
         RespPla.NombreEmpleado AS ResponsablePlanilla,
+        ISNULL(pl.CantidadResponsables, 0) AS CantidadResponsablesPlanilla,
 
-        ISNULL(
-            pl.CantidadResponsables,
-            0
-        ) AS CantidadResponsablesPlanilla,
-
-
-        /* ========================================================
-           PLANILLA - SOLICITANTE
-           ======================================================== */
-
+        /* PLANILLA - SOLICITANTE */
         pl.IdSolicitantePlanilla,
+        SolPla.NombreEmpleado AS SolicitantePlanilla,
+        ISNULL(pl.CantidadSolicitantes, 0) AS CantidadSolicitantesPlanilla,
 
-        COALESCE(
-            NULLIF(pl.SolicitantesPlanilla, ''),
-            SolPla.NombreEmpleado
-        ) AS SolicitantePlanilla,
-
-        ISNULL(
-            pl.CantidadSolicitantes,
-            0
-        ) AS CantidadSolicitantesPlanilla,
-
-
-        /* ========================================================
-           PLANILLA - MONEDA
-           ======================================================== */
-
+        /* PLANILLA - MONEDA */
         pl.TipoMonedaPlanilla AS IdMonedaPlanilla,
-
         pl.MonedaPlanilla,
+        ISNULL(pl.CantidadMonedasPlanilla, 0) AS CantidadMonedasPlanilla,
 
-        ISNULL(
-            pl.CantidadMonedasPlanilla,
-            0
-        ) AS CantidadMonedasPlanilla,
+        /* PLANILLA - MONTOS */
+        ISNULL(pl.SubtotalPlanilla, 0) AS SubtotalPlanilla,
+        ISNULL(pl.IgvPlanilla, 0) AS IgvPlanilla,
+        ISNULL(pl.TotalPlanilla, 0) AS TotalPlanilla,
+        ISNULL(pl.MontoRetencionPlanilla, 0) AS MontoRetencionPlanilla,
+        ISNULL(pl.TotalPagarPlanilla, 0) AS TotalPagarPlanilla,
 
-
-        /* ========================================================
-           PLANILLA - MONTOS
-           ======================================================== */
-
-        ISNULL(
-            pl.SubtotalPlanilla,
-            0
-        ) AS SubtotalPlanilla,
-
-        ISNULL(
-            pl.IgvPlanilla,
-            0
-        ) AS IgvPlanilla,
-
-        ISNULL(
-            pl.TotalPlanilla,
-            0
-        ) AS TotalPlanilla,
-
-        ISNULL(
-            pl.MontoRetencionPlanilla,
-            0
-        ) AS MontoRetencionPlanilla,
-
-        ISNULL(
-            pl.TotalPagarPlanilla,
-            0
-        ) AS TotalPagarPlanilla,
-
-
-        /* ========================================================
-           PLANILLA - FECHAS
-           ======================================================== */
-
+        /* PLANILLA - FECHAS */
         pl.PrimeraFechaIngreso,
-
         pl.UltimaFechaIngreso,
-
         pl.PrimeraFechaDeposito,
-
         pl.UltimaFechaDeposito,
 
-
-        /* ========================================================
-           VALIDACIÓN RESPONSABLE
-           ======================================================== */
-
+        /* VALIDACIÓN RESPONSABLE */
         CASE
             WHEN ISNULL(pl.CantidadPlanillas, 0) = 0
                 THEN 'SIN PLANILLA'
-
             WHEN ISNULL(pl.CantidadResponsables, 0) > 1
                 THEN 'VARIOS RESPONSABLES EN PLANILLA'
-
             WHEN pl.IdResponsablePlanilla = a6.IdResponsable
                 THEN 'RESPONSABLE COINCIDE'
-
             ELSE
                 'RESPONSABLE DIFERENTE'
-
         END AS ValidacionResponsable,
 
-
-        /* ========================================================
-           IMPORTAR
-           ======================================================== */
-
+        /* IMPORTAR */
         CASE
             WHEN ISNULL(imp.CantidadImportar, 0) > 0
                 THEN 1
             ELSE 0
         END AS TieneImportar,
 
-        ISNULL(
-            imp.CantidadImportar,
-            0
-        ) AS CantidadImportar,
-
-        ISNULL(
-            imp.CantidadImportarActivos,
-            0
-        ) AS CantidadImportarActivos,
-
-        ISNULL(
-            imp.CantidadImportarInactivos,
-            0
-        ) AS CantidadImportarInactivos,
+        ISNULL(imp.CantidadImportar, 0) AS CantidadImportar,
+        ISNULL(imp.CantidadImportarActivos, 0) AS CantidadImportarActivos,
+        ISNULL(imp.CantidadImportarInactivos, 0) AS CantidadImportarInactivos,
 
         imp.Atp,
-
         imp.Status_Pap,
 
-
-        /* ========================================================
-           STATUS CLARO
-           ======================================================== */
-
+        /* STATUS CLARO */
         ope.StatusClaro,
 
-
-        /* ========================================================
-           COMPARACIÓN OC VS PLANILLA
-           ======================================================== */
-
-        ISNULL(a6.Subtotal, 0)
+        /* COMPARACIÓN OC VS PLANILLA */
+        ISNULL((ISNULL(a5.PrecioUnitario, 0) * ISNULL(a5.Cantidad, 0)), 0)
         -
         ISNULL(pl.SubtotalPlanilla, 0)
         AS SaldoOcVsPlanilla,
 
-
+        /* PORCENTAJE CONSUMIDO OC
+           SubtotalPlanilla (IdOc + Fila) / SubtotalOc detalle (IdOc + Fila) x 100
+           SubtotalPlanilla considera todos los estados excepto Estado = 3 */
         CASE
-            WHEN ISNULL(a6.Total, 0) = 0
+            WHEN ISNULL((ISNULL(a5.PrecioUnitario, 0) * ISNULL(a5.Cantidad, 0)), 0) = 0
                 THEN 0
-
             ELSE
                 CAST(
                     ROUND(
                         (
-                            ISNULL(pl.TotalPlanilla, 0)
+                            ISNULL(pl.SubtotalPlanilla, 0)
                             /
-                            NULLIF(a6.Total, 0)
+                            NULLIF((ISNULL(a5.PrecioUnitario, 0) * ISNULL(a5.Cantidad, 0)), 0)
                         ) * 100,
                         2
-                    ) AS DECIMAL(18, 2)
+                    )
+                    AS DECIMAL(18,2)
                 )
-
         END AS PorcentajeConsumidoOc,
 
-
-        /* ========================================================
-           ESTADO GENERAL DE RELACIÓN
-           ======================================================== */
-
+        /* ESTADO GENERAL DE RELACIÓN */
         CASE
             WHEN ISNULL(pl.CantidadPlanillas, 0) = 0
                  AND ISNULL(imp.CantidadImportar, 0) = 0
@@ -468,561 +254,299 @@ BEGIN
 
             ELSE
                 'RELACION COMPLETA'
+        END AS EstadoRelacion,
 
-        END AS EstadoRelacion
+        a5.TipoTrabajo,
+        a5.idtarea,
+        tar.valorini as Tarea,
+        CtaEmp.idCargo,
+        CtaEmp.Cuenta,
+        CtaEmp.CuentaInter,
+        CtaEmp.NombreCta,
+        ConsBco.ValorIni as Banco,
+        a6.IdComprobante,
+        comp.ValorIni as Comprobante,
+        a5.fila,
+        a5.detalle
 
 
-    /* ============================================================
-       CABORDENCOMPRA
-       ============================================================ */
-
+    /* CABORDENCOMPRA */
     FROM dbo.CabOrdenCompra a6
 
-
-    /* ============================================================
-       DETORDENCOMPRA
-       ============================================================ */
-
+    /* DETORDENCOMPRA */
     LEFT JOIN dbo.DetOrdenCompra a5
         ON a5.IdOc = a6.IdOc
 
+    /* COMPROBANTE */
+    LEFT JOIN dbo.Constante Comp
+        ON Comp.campo = 'tipo_comprobante' AND Comp.Correlativo = a5.IdComprobante
 
-    /* ============================================================
-       SOLICITANTE OC
-       ============================================================ */
+    /* TAREA */
+    LEFT JOIN dbo.Constante Tar
+        ON tar.Campo = 'tarea'
+       AND tar.Correlativo = a5.IdTarea
 
-    LEFT JOIN dbo.EmpleadoCj SolicitanteOcCj
-        ON SolicitanteOcCj.IdEmpleado = a6.IdSolicitante
-       AND ISNULL(a6.IdWeb, 0) = 1
-
-    LEFT JOIN dbo.Empleado SolicitanteOc
-        ON SolicitanteOc.IdEmpleado = a6.IdSolicitante
-       AND ISNULL(a6.IdWeb, 0) <> 1
-
-
-    /* ============================================================
-       RESPONSABLE OC
-       ============================================================ */
-
+    /* RESPONSABLE OC */
     LEFT JOIN dbo.Empleado RespOc
         ON RespOc.IdEmpleado = a6.IdResponsable
 
+    /* CUENTA RESPONSABLE */
     LEFT JOIN dbo.CuentaEmpleado CtaEmp
         ON CtaEmp.IdEmpleado = a6.IdResponsable
 
-    LEFT JOIN dbo.Constante BancoCta
-        ON BancoCta.Campo = 'BANCO'
-       AND BancoCta.Correlativo = CtaEmp.IdBanco
+    /* BANCO CUENTA RESPONSABLE */
+    LEFT JOIN dbo.Constante ConsBco
+        ON ConsBco.campo = 'BANCO' AND ConsBco.Correlativo = CtaEmp.IdBanco
 
-
-    /* ============================================================
-       VALIDADOR OC
-       ============================================================ */
-
-    LEFT JOIN dbo.EmpleadoCj ValidadorOcCj
-        ON ValidadorOcCj.IdEmpleado = a6.IdValidador
-       AND ISNULL(a6.IdWeb, 0) = 1
-
-    LEFT JOIN dbo.Empleado ValidadorOc
-        ON ValidadorOc.IdEmpleado = a6.IdValidador
+    /* SOLICITANTE OC - SISTEMA ANTIGUO (IdWeb <> 1 / NULL)
+       CabOrdenCompra.IdSolicitante -> Empleado.IdEmpleado */
+    LEFT JOIN dbo.Empleado SolOc
+        ON SolOc.IdEmpleado = a6.IdSolicitante
        AND ISNULL(a6.IdWeb, 0) <> 1
 
-    LEFT JOIN dbo.EmpleadoCj Aprobador1OcCj
-        ON Aprobador1OcCj.IdEmpleado = a5.IdAprobador1
+    /* SOLICITANTE OC - SISTEMA ANTIGUO -> EMPLEADOCJ
+       Empleado.IdEmpleadoCj -> EmpleadoCj.IdEmpleado */
+    LEFT JOIN dbo.EmpleadoCj SolOcCjOld
+        ON SolOcCjOld.IdEmpleado = SolOc.IdEmpleadoCj
+       AND ISNULL(a6.IdWeb, 0) <> 1
 
-    LEFT JOIN dbo.Empleado Aprobador1Oc
-        ON Aprobador1Oc.IdEmpleado = a5.IdAprobador1
+    /* SOLICITANTE OC - WEB (IdWeb = 1)
+       CabOrdenCompra.IdSolicitante -> EmpleadoCj.IdEmpleado */
+    LEFT JOIN dbo.EmpleadoCj SolOcCj
+        ON SolOcCj.IdEmpleado = a6.IdSolicitante
+       AND ISNULL(a6.IdWeb, 0) = 1
 
-    LEFT JOIN dbo.EmpleadoCj Aprobador2OcCj
-        ON Aprobador2OcCj.IdEmpleado = a5.IdAprobador2
+    /* VALIDADOR OC - SISTEMA ANTIGUO */
+    LEFT JOIN dbo.Empleado ValOc
+        ON ValOc.IdEmpleado = a6.IdValidador
+       AND ISNULL(a6.IdWeb, 0) <> 1
 
-    LEFT JOIN dbo.Empleado Aprobador2Oc
-        ON Aprobador2Oc.IdEmpleado = a5.IdAprobador2
+    /* VALIDADOR OC - WEB */
+    LEFT JOIN dbo.EmpleadoCj ValOcCj
+        ON ValOcCj.IdEmpleado = a6.IdValidador
+       AND ISNULL(a6.IdWeb, 0) = 1
 
-    LEFT JOIN dbo.EmpleadoCj Aprobador3OcCj
-        ON Aprobador3OcCj.IdEmpleado = a5.IdAprobador3
-
-    LEFT JOIN dbo.Empleado Aprobador3Oc
-        ON Aprobador3Oc.IdEmpleado = a5.IdAprobador3
-
-
-    /* ============================================================
-       MONEDA ORDEN DE COMPRA
-       ============================================================ */
-
+    /* MONEDA ORDEN DE COMPRA */
     LEFT JOIN dbo.Constante MonedaOc
         ON MonedaOc.Campo = 'TIPO_MONEDA'
        AND MonedaOc.Correlativo = a6.IdMoneda
 
-    LEFT JOIN dbo.Constante ComprobanteOc
-        ON ComprobanteOc.Campo = 'TIPO_COMPROBANTE'
-       AND ComprobanteOc.Correlativo = a6.IdComprobante
-
-    LEFT JOIN dbo.Constante TareaOc
-        ON TareaOc.Campo = 'TAREA'
-       AND TareaOc.Correlativo = a5.IdTarea
-
-
-    /* ============================================================
-       CLIENTE
-       ============================================================ */
-
+    /* CLIENTE */
     LEFT JOIN dbo.Cliente cli
         ON cli.IdCliente = a5.IdCliente
 
-
-    /* ============================================================
-       PROYECTO
-       ============================================================ */
-
+    /* PROYECTO */
     LEFT JOIN dbo.Proyecto pro
         ON pro.IdProyecto = a5.IdProyecto
 
-
-    /* ============================================================
-       SITE
-       ============================================================ */
-
+    /* SITE */
     LEFT JOIN dbo.Site st
         ON st.IdSite = a5.IdSite
        AND st.Correlativo = a5.Correlativo
 
 
     /* ============================================================
-       PLANILLA
+       PLANILLA (sin Estado = 3 RECHAZADO)
        ============================================================ */
 
     OUTER APPLY
     (
         SELECT
 
-            /* ====================================================
-               CANTIDAD PLANILLAS
-               ==================================================== */
-
+            /* CANTIDAD PLANILLAS */
             COUNT(*) AS CantidadPlanillas,
 
-
-            /* ====================================================
-               CORRELATIVOS PLANILLA
-               ==================================================== */
-
-            STRING_AGG(
-                CONVERT(VARCHAR(MAX), p.Correlativo),
-                ', '
-            ) AS CorrelativoPlanilla,
-
-
-            /* ====================================================
-               ESTADOS PLANILLA
-               ==================================================== */
-
-            COUNT(
-                DISTINCT p.Estado
-            ) AS CantidadEstadosPlanilla,
+            /* ESTADOS PLANILLA */
+            COUNT(DISTINCT p.Estado) AS CantidadEstadosPlanilla,
 
             CASE
                 WHEN COUNT(DISTINCT p.Estado) = 1
                     THEN MAX(p.Estado)
-
                 ELSE NULL
-
             END AS IdEstadoPlanilla,
 
             CASE
                 WHEN COUNT(*) = 0
                     THEN NULL
-
                 WHEN COUNT(DISTINCT p.Estado) = 1
                     THEN MAX(EstadoPla.ValorIni)
-
                 ELSE
                     'VARIOS ESTADOS'
-
             END AS EstadoPlanilla,
 
-
-            /* ====================================================
-               RESPONSABLE PLANILLA
-               ==================================================== */
-
-            COUNT(
-                DISTINCT p.IdResponsable
-            ) AS CantidadResponsables,
+            /* RESPONSABLE PLANILLA */
+            COUNT(DISTINCT p.IdResponsable) AS CantidadResponsables,
 
             CASE
                 WHEN COUNT(DISTINCT p.IdResponsable) = 1
                     THEN MAX(p.IdResponsable)
-
                 ELSE NULL
-
             END AS IdResponsablePlanilla,
 
-
-            /* ====================================================
-               SOLICITANTE PLANILLA
-
-               Planilla.IdSolicitante
-                         ↓
-               Empleado.IdEmpleado
-               ==================================================== */
-
-            COUNT(
-                DISTINCT p.IdSolicitante
-            ) AS CantidadSolicitantes,
+            /* SOLICITANTE PLANILLA */
+            COUNT(DISTINCT p.IdSolicitante) AS CantidadSolicitantes,
 
             CASE
                 WHEN COUNT(DISTINCT p.IdSolicitante) = 1
                     THEN MAX(p.IdSolicitante)
-
                 ELSE NULL
-
             END AS IdSolicitantePlanilla,
 
-            /* Todos los solicitantes de los pagos asociados al detalle OC/site. */
-            (
-                SELECT STRING_AGG(CAST(solicitante.NombreEmpleado AS VARCHAR(MAX)), ', ')
-                FROM
-                (
-                    SELECT DISTINCT
-                        NULLIF(
-                            LTRIM(RTRIM(
-                                CASE
-                                    WHEN ISNULL(planillaSolicitante.IdWeb, 0) = 1
-                                        THEN empSolicitanteCj.NombreEmpleado
-                                    ELSE empSolicitante.NombreEmpleado
-                                END
-                            )),
-                            ''
-                        ) AS NombreEmpleado
-                    FROM dbo.Planilla planillaSolicitante
-                    LEFT JOIN dbo.Empleado empSolicitante
-                        ON empSolicitante.IdEmpleado = planillaSolicitante.IdSolicitante
-                       AND ISNULL(planillaSolicitante.IdWeb, 0) <> 1
-                    LEFT JOIN dbo.EmpleadoCj empSolicitanteCj
-                        ON empSolicitanteCj.IdEmpleado = planillaSolicitante.IdSolicitante
-                       AND ISNULL(planillaSolicitante.IdWeb, 0) = 1
-                    WHERE planillaSolicitante.IdOc = a5.IdOc
-                      AND planillaSolicitante.IdCliente = a5.IdCliente
-                      AND planillaSolicitante.IdProyecto = a5.IdProyecto
-                      AND planillaSolicitante.IdSite = a5.IdSite
-                      AND planillaSolicitante.CorreSite = a5.Correlativo
-                      AND (
-                            NOT EXISTS (SELECT 1 FROM @Solicitantes)
-                            OR EXISTS (SELECT 1 FROM @Solicitantes filtroSolicitante WHERE filtroSolicitante.IdSolicitante = planillaSolicitante.IdSolicitante)
-                          )
-                      AND NULLIF(LTRIM(RTRIM(CASE WHEN ISNULL(planillaSolicitante.IdWeb, 0) = 1 THEN empSolicitanteCj.NombreEmpleado ELSE empSolicitante.NombreEmpleado END)), '') IS NOT NULL
-                ) solicitante
-            ) AS SolicitantesPlanilla,
-
-
-            /* ====================================================
-               MONEDA PLANILLA
-               ==================================================== */
-
-            COUNT(
-                DISTINCT p.TipoMoneda
-            ) AS CantidadMonedasPlanilla,
+            /* MONEDA PLANILLA */
+            COUNT(DISTINCT p.TipoMoneda) AS CantidadMonedasPlanilla,
 
             CASE
                 WHEN COUNT(DISTINCT p.TipoMoneda) = 1
                     THEN MAX(p.TipoMoneda)
-
                 ELSE NULL
-
             END AS TipoMonedaPlanilla,
 
             CASE
                 WHEN COUNT(*) = 0
                     THEN NULL
-
                 WHEN COUNT(DISTINCT p.TipoMoneda) = 1
                     THEN MAX(MonedaPla.ValorIni)
-
                 ELSE
                     'VARIAS MONEDAS'
-
             END AS MonedaPlanilla,
 
-
-            /* ====================================================
-               MONTOS PLANILLA
-               ==================================================== */
-
+            /* MONTOS PLANILLA (Estado <> 3; el WHERE ya excluye el 3) */
             SUM(
-                ISNULL(p.Subtotal, 0)
+                CASE
+                    WHEN ISNULL(p.Estado, 0) <> 3
+                        THEN ISNULL(p.Subtotal, 0)
+                    ELSE 0
+                END
             ) AS SubtotalPlanilla,
 
             SUM(
-                ISNULL(p.Igv, 0)
+                CASE
+                    WHEN ISNULL(p.Estado, 0) <> 3
+                        THEN ISNULL(p.Igv, 0)
+                    ELSE 0
+                END
             ) AS IgvPlanilla,
 
             SUM(
-                ISNULL(p.Total, 0)
+                CASE
+                    WHEN ISNULL(p.Estado, 0) <> 3
+                        THEN ISNULL(p.Total, 0)
+                    ELSE 0
+                END
             ) AS TotalPlanilla,
 
             SUM(
-                ISNULL(p.MontoRetencion, 0)
+                CASE
+                    WHEN ISNULL(p.Estado, 0) <> 3
+                        THEN ISNULL(p.MontoRetencion, 0)
+                    ELSE 0
+                END
             ) AS MontoRetencionPlanilla,
 
             SUM(
-                ISNULL(p.TotalPagar, 0)
+                CASE
+                    WHEN ISNULL(p.Estado, 0) <> 3
+                        THEN ISNULL(p.TotalPagar, 0)
+                    ELSE 0
+                END
             ) AS TotalPagarPlanilla,
 
-
-            /* ====================================================
-               PRIMERA FECHA INGRESO
-               ==================================================== */
-
+            /* PRIMERA FECHA INGRESO */
             MIN
             (
                 COALESCE
                 (
-                    TRY_CONVERT(
-                        DATE,
-                        NULLIF(
-                            LTRIM(
-                                RTRIM(
-                                    CONVERT(VARCHAR(50), p.FecIngreso)
-                                )
-                            ),
-                            ''
-                        ),
-                        101
-                    ),
-
-                    TRY_CONVERT(
-                        DATE,
-                        NULLIF(
-                            LTRIM(
-                                RTRIM(
-                                    CONVERT(VARCHAR(50), p.FecIngreso)
-                                )
-                            ),
-                            ''
-                        ),
-                        103
-                    ),
-
-                    TRY_CONVERT(
-                        DATE,
-                        NULLIF(
-                            LTRIM(
-                                RTRIM(
-                                    CONVERT(VARCHAR(50), p.FecIngreso)
-                                )
-                            ),
-                            ''
-                        ),
-                        23
-                    )
+                    TRY_CONVERT(DATE, NULLIF(LTRIM(RTRIM(CONVERT(VARCHAR(50), p.FecIngreso))), ''), 101),
+                    TRY_CONVERT(DATE, NULLIF(LTRIM(RTRIM(CONVERT(VARCHAR(50), p.FecIngreso))), ''), 103),
+                    TRY_CONVERT(DATE, NULLIF(LTRIM(RTRIM(CONVERT(VARCHAR(50), p.FecIngreso))), ''), 23)
                 )
             ) AS PrimeraFechaIngreso,
 
-
-            /* ====================================================
-               ÚLTIMA FECHA INGRESO
-               ==================================================== */
-
+            /* ÚLTIMA FECHA INGRESO */
             MAX
             (
                 COALESCE
                 (
-                    TRY_CONVERT(
-                        DATE,
-                        NULLIF(
-                            LTRIM(
-                                RTRIM(
-                                    CONVERT(VARCHAR(50), p.FecIngreso)
-                                )
-                            ),
-                            ''
-                        ),
-                        101
-                    ),
-
-                    TRY_CONVERT(
-                        DATE,
-                        NULLIF(
-                            LTRIM(
-                                RTRIM(
-                                    CONVERT(VARCHAR(50), p.FecIngreso)
-                                )
-                            ),
-                            ''
-                        ),
-                        103
-                    ),
-
-                    TRY_CONVERT(
-                        DATE,
-                        NULLIF(
-                            LTRIM(
-                                RTRIM(
-                                    CONVERT(VARCHAR(50), p.FecIngreso)
-                                )
-                            ),
-                            ''
-                        ),
-                        23
-                    )
+                    TRY_CONVERT(DATE, NULLIF(LTRIM(RTRIM(CONVERT(VARCHAR(50), p.FecIngreso))), ''), 101),
+                    TRY_CONVERT(DATE, NULLIF(LTRIM(RTRIM(CONVERT(VARCHAR(50), p.FecIngreso))), ''), 103),
+                    TRY_CONVERT(DATE, NULLIF(LTRIM(RTRIM(CONVERT(VARCHAR(50), p.FecIngreso))), ''), 23)
                 )
             ) AS UltimaFechaIngreso,
 
-
-            /* ====================================================
-               PRIMERA FECHA DEPÓSITO
-               ==================================================== */
-
+            /* PRIMERA FECHA DEPÓSITO */
             MIN
             (
                 COALESCE
                 (
-                    TRY_CONVERT(
-                        DATE,
-                        NULLIF(
-                            LTRIM(
-                                RTRIM(
-                                    CONVERT(VARCHAR(50), p.FechaDeposito)
-                                )
-                            ),
-                            ''
-                        ),
-                        101
-                    ),
-
-                    TRY_CONVERT(
-                        DATE,
-                        NULLIF(
-                            LTRIM(
-                                RTRIM(
-                                    CONVERT(VARCHAR(50), p.FechaDeposito)
-                                )
-                            ),
-                            ''
-                        ),
-                        103
-                    ),
-
-                    TRY_CONVERT(
-                        DATE,
-                        NULLIF(
-                            LTRIM(
-                                RTRIM(
-                                    CONVERT(VARCHAR(50), p.FechaDeposito)
-                                )
-                            ),
-                            ''
-                        ),
-                        23
-                    )
+                    TRY_CONVERT(DATE, NULLIF(LTRIM(RTRIM(CONVERT(VARCHAR(50), p.FechaDeposito))), ''), 101),
+                    TRY_CONVERT(DATE, NULLIF(LTRIM(RTRIM(CONVERT(VARCHAR(50), p.FechaDeposito))), ''), 103),
+                    TRY_CONVERT(DATE, NULLIF(LTRIM(RTRIM(CONVERT(VARCHAR(50), p.FechaDeposito))), ''), 23)
                 )
             ) AS PrimeraFechaDeposito,
 
-
-            /* ====================================================
-               ÚLTIMA FECHA DEPÓSITO
-               ==================================================== */
-
+            /* ÚLTIMA FECHA DEPÓSITO */
             MAX
             (
                 COALESCE
                 (
-                    TRY_CONVERT(
-                        DATE,
-                        NULLIF(
-                            LTRIM(
-                                RTRIM(
-                                    CONVERT(VARCHAR(50), p.FechaDeposito)
-                                )
-                            ),
-                            ''
-                        ),
-                        101
-                    ),
-
-                    TRY_CONVERT(
-                        DATE,
-                        NULLIF(
-                            LTRIM(
-                                RTRIM(
-                                    CONVERT(VARCHAR(50), p.FechaDeposito)
-                                )
-                            ),
-                            ''
-                        ),
-                        103
-                    ),
-
-                    TRY_CONVERT(
-                        DATE,
-                        NULLIF(
-                            LTRIM(
-                                RTRIM(
-                                    CONVERT(VARCHAR(50), p.FechaDeposito)
-                                )
-                            ),
-                            ''
-                        ),
-                        23
-                    )
+                    TRY_CONVERT(DATE, NULLIF(LTRIM(RTRIM(CONVERT(VARCHAR(50), p.FechaDeposito))), ''), 101),
+                    TRY_CONVERT(DATE, NULLIF(LTRIM(RTRIM(CONVERT(VARCHAR(50), p.FechaDeposito))), ''), 103),
+                    TRY_CONVERT(DATE, NULLIF(LTRIM(RTRIM(CONVERT(VARCHAR(50), p.FechaDeposito))), ''), 23)
                 )
             ) AS UltimaFechaDeposito
 
-
         FROM dbo.Planilla p
 
-
-        /* ========================================================
-           ESTADO PLANILLA
-           ======================================================== */
-
+        /* ESTADO PLANILLA */
         LEFT JOIN dbo.Constante EstadoPla
             ON EstadoPla.Campo = 'ESTADO'
            AND EstadoPla.Correlativo = p.Estado
 
-
-        /* ========================================================
-           MONEDA PLANILLA
-           ======================================================== */
-
+        /* MONEDA PLANILLA */
         LEFT JOIN dbo.Constante MonedaPla
             ON MonedaPla.Campo = 'TIPO_MONEDA'
            AND MonedaPla.Correlativo = p.TipoMoneda
 
-
         WHERE
-
             p.IdOc = a5.IdOc
 
-            AND p.IdCliente = a5.IdCliente
+            AND p.Fila = a5.Fila
 
-            AND p.IdProyecto = a5.IdProyecto
-
-             AND p.IdSite = a5.IdSite
-
-             AND p.CorreSite = a5.Correlativo
-
+            AND ISNULL(p.Estado, 0) <> 3
 
     ) pl
 
 
     /* ============================================================
-       RESPONSABLE PLANILLA
+       CORRELATIVOS PLANILLA
+       TODOS LOS ESTADOS EXCEPTO PLANILLA.ESTADO = 3 (RECHAZADO)
        ============================================================ */
 
+    OUTER APPLY
+    (
+        SELECT
+            STRING_AGG(
+                CONVERT(VARCHAR(MAX), p4.Correlativo),
+                ', '
+            ) AS CorrelativoPlanilla
+
+        FROM dbo.Planilla p4
+
+        WHERE
+            p4.IdOc = a5.IdOc
+
+            AND p4.Fila = a5.Fila
+
+            AND ISNULL(p4.Estado, 0) <> 3
+
+    ) plPagada
+
+
+    /* RESPONSABLE PLANILLA */
     LEFT JOIN dbo.Empleado RespPla
         ON RespPla.IdEmpleado = pl.IdResponsablePlanilla
 
-
-    /* ============================================================
-       SOLICITANTE PLANILLA
-
-       Planilla.IdSolicitante
-                ↓
-       Empleado.IdEmpleado
-       ============================================================ */
-
+    /* SOLICITANTE PLANILLA */
     LEFT JOIN dbo.Empleado SolPla
         ON SolPla.IdEmpleado = pl.IdSolicitantePlanilla
 
@@ -1053,23 +577,16 @@ BEGIN
                 END
             ) AS CantidadImportarInactivos,
 
-            MAX(
-                imp1.Atp
-            ) AS Atp,
+            MAX(imp1.Atp) AS Atp,
 
-            MAX(
-                imp1.Status_Pap
-            ) AS Status_Pap
+            MAX(imp1.Status_Pap) AS Status_Pap
 
         FROM dbo.Importar imp1
 
         WHERE
             imp1.IdCliente = a5.IdCliente
-
             AND imp1.IdProyecto = a5.IdProyecto
-
             AND imp1.IdSite = a5.IdSite
-
             AND imp1.Correlativo = a5.Correlativo
 
     ) imp
@@ -1083,9 +600,7 @@ BEGIN
     (
         SELECT
 
-            MAX(
-                EstadoClaro.ValorIni
-            ) AS StatusClaro
+            MAX(EstadoClaro.ValorIni) AS StatusClaro
 
         FROM dbo.Db_Operaciones_Cj op
 
@@ -1094,13 +609,9 @@ BEGIN
            AND EstadoClaro.Correlativo = op.Status_Claro
 
         WHERE
-
             op.IdCliente = a5.IdCliente
-
             AND op.IdProyecto = a5.IdProyecto
-
             AND op.IdSite = a5.IdSite
-
             AND op.CorreSite = a5.Correlativo
 
     ) ope
@@ -1112,178 +623,126 @@ BEGIN
 
     WHERE 1 = 1
 
+    /* ID OC */
+    AND
+    (
+        @Id IS NULL
+        OR a6.IdOc = @Id
+    )
 
-      /* ==========================================================
-         ID OC
-         ========================================================== */
+    /* RESPONSABLES MÚLTIPLES */
+    AND
+    (
+        @IdResponsable IS NULL
+        OR EXISTS
+        (
+            SELECT 1
+            FROM STRING_SPLIT(@IdResponsable, ',') AS resp
+            WHERE TRY_CONVERT(INT, LTRIM(RTRIM(resp.value))) = a6.IdResponsable
+        )
+    )
 
-      AND
-      (
-            @Id IS NULL
-            OR a6.IdOc = @Id
-      )
+    /* SOLICITANTES MÚLTIPLES
+       IdWeb = 1      -> @IdSolicitante compara contra EmpleadoCj.IdEmpleado
+       IdWeb = 0/NULL -> @IdSolicitante compara contra Empleado.IdEmpleadoCj
+       El parámetro siempre debe recibir el identificador equivalente de EmpleadoCj. */
+    AND
+    (
+        @IdSolicitante IS NULL
+        OR EXISTS
+        (
+            SELECT 1
+            FROM STRING_SPLIT(@IdSolicitante, ',') AS sol
+            WHERE
+                TRY_CONVERT(INT, LTRIM(RTRIM(sol.value)))
+                =
+                CASE
+                    WHEN ISNULL(a6.IdWeb, 0) = 1
+                        THEN SolOcCj.IdEmpleado
+                    ELSE
+                        SolOc.IdEmpleadoCj
+                END
+        )
+    )
 
+    /* CLIENTE */
+    AND
+    (
+        @IdCliente IS NULL
+        OR a5.IdCliente = @IdCliente
+    )
 
-      /* ==========================================================
-         RESPONSABLE CABORDENCOMPRA
-         ========================================================== */
+    /* PROYECTOS MÚLTIPLES */
+    AND
+    (
+        @IdProyecto IS NULL
+        OR EXISTS
+        (
+            SELECT 1
+            FROM STRING_SPLIT(@IdProyecto, ',') AS proy
+            WHERE TRY_CONVERT(INT, LTRIM(RTRIM(proy.value))) = a5.IdProyecto
+        )
+    )
 
-      AND
-      (
-            NOT EXISTS (SELECT 1 FROM @Responsables)
-            OR EXISTS (SELECT 1 FROM @Responsables filtroResponsable WHERE filtroResponsable.IdResponsable = a6.IdResponsable)
-      )
+    /* SITE */
+    AND
+    (
+        @IdSite IS NULL
+        OR EXISTS
+        (
+            SELECT 1
+            FROM STRING_SPLIT(@IdSite, ',') AS site
+            WHERE LTRIM(RTRIM(site.value)) = CONVERT(VARCHAR(200), a5.IdSite)
+        )
+    )
 
+    /* NOMBRE PROYECTO */
+    AND
+    (
+        @pProyecto IS NULL
+        OR LTRIM(RTRIM(UPPER(pro.NombreProyecto))) = LTRIM(RTRIM(UPPER(@pProyecto)))
+    )
 
-      /* ==========================================================
-         CLIENTE
-         ========================================================== */
+    /* ESTADOS DETORDENCOMPRA */
+    AND
+    (
+        @Estados IS NULL
+        OR EXISTS
+        (
+            SELECT 1
+            FROM STRING_SPLIT(@Estados, ',') AS est
+            WHERE TRY_CONVERT(INT, LTRIM(RTRIM(est.value))) = a5.IdEstado
+        )
+    )
 
-      AND
-      (
-            @IdCliente IS NULL
-            OR a5.IdCliente = @IdCliente
-      )
+    /* FECHA INICIO */
+    AND
+    (
+        @FechaInicio IS NULL
+        OR TRY_CONVERT(DATE, a5.FechaCreacion) >= @FechaInicio
+    )
 
+    /* FECHA FIN */
+    AND
+    (
+        @FechaFin IS NULL
+        OR TRY_CONVERT(DATE, a5.FechaCreacion) <= @FechaFin
+    )
 
-      /* ==========================================================
-         PROYECTO
-         ========================================================== */
+    /* AÑO */
+    AND
+    (
+        @Ano IS NULL
+        OR YEAR(TRY_CONVERT(DATE, a5.FechaCreacion)) = @Ano
+    )
 
-      AND
-      (
-            NOT EXISTS (SELECT 1 FROM @Proyectos)
-            OR EXISTS (SELECT 1 FROM @Proyectos filtroProyecto WHERE filtroProyecto.IdProyecto = a5.IdProyecto)
-      )
-
-      AND
-      (
-            NOT EXISTS (SELECT 1 FROM @Solicitantes)
-            OR EXISTS (SELECT 1 FROM @Solicitantes filtroSolicitante WHERE filtroSolicitante.IdSolicitante = a6.IdSolicitante)
-      )
-
-
-      /* ==========================================================
-         SITE
-         ========================================================== */
-
-      AND
-      (
-            @IdSite IS NULL
-            OR EXISTS
-            (
-                SELECT 1
-                FROM STRING_SPLIT(@IdSite, ',') AS site
-                WHERE LTRIM(RTRIM(site.value)) = CONVERT(VARCHAR(200), a5.IdSite)
-            )
-      )
-
-
-      /* ==========================================================
-         NOMBRE PROYECTO
-         ========================================================== */
-
-      AND
-      (
-            @pProyecto IS NULL
-
-            OR LTRIM(RTRIM(UPPER(pro.NombreProyecto)))
-               =
-               LTRIM(RTRIM(UPPER(@pProyecto)))
-      )
-
-
-      /* ==========================================================
-         ESTADOS DETORDENCOMPRA
-         ========================================================== */
-
-      AND
-      (
-            @Estados IS NULL
-
-            OR EXISTS
-            (
-                SELECT 1
-
-                FROM STRING_SPLIT(
-                    @Estados,
-                    ','
-                ) AS est
-
-                WHERE TRY_CONVERT(
-                          INT,
-                          LTRIM(RTRIM(est.value))
-                      ) = a5.IdEstado
-            )
-      )
-
-
-      /* ==========================================================
-         FECHA INICIO
-         ========================================================== */
-
-      AND
-      (
-            @FechaInicio IS NULL
-
-            OR TRY_CONVERT(
-                    DATE,
-                    a5.FechaCreacion
-               ) >= @FechaInicio
-      )
-
-
-      /* ==========================================================
-         FECHA FIN
-         ========================================================== */
-
-      AND
-      (
-            @FechaFin IS NULL
-
-            OR TRY_CONVERT(
-                    DATE,
-                    a5.FechaCreacion
-               ) <= @FechaFin
-      )
-
-
-      /* ==========================================================
-         AÑO
-         ========================================================== */
-
-      AND
-      (
-            @Ano IS NULL
-
-            OR YEAR(
-                    TRY_CONVERT(
-                        DATE,
-                        a5.FechaCreacion
-                    )
-               ) = @Ano
-      )
-
-
-    /* ============================================================
-       ORDEN
-       ============================================================ */
-
+    /* ORDEN */
     ORDER BY
-
         a6.IdOc DESC,
-
         a5.IdCliente,
-
         a5.IdProyecto,
-
         a5.IdSite,
-
         a5.Correlativo;
 
-END
+END;
 GO
-    INSERT INTO @Responsables (IdResponsable)
-    SELECT DISTINCT TRY_CONVERT(INT, LTRIM(RTRIM(value)))
-    FROM STRING_SPLIT(ISNULL(@IdResponsable, ''), ',')
-    WHERE TRY_CONVERT(INT, LTRIM(RTRIM(value))) > 0;

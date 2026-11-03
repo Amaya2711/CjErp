@@ -84,7 +84,7 @@ public sealed class ReporteAutomaticoService : IReporteAutomaticoService
         return Task.FromResult(BuildPeriodoActual(ReporteWhatsappTipos.Operativo, null, null));
     }
 
-    public async Task<(byte[] Pdf, string NombreArchivo)> GenerarVistaPreviaPdfAsync(string tipoReporte, int? idEmpleado = null, CancellationToken cancellationToken = default)
+    public async Task<(byte[] Pdf, string NombreArchivo)> GenerarVistaPreviaPdfAsync(string tipoReporte, int? idEmpleado = null, int? anio = null, int? mes = null, CancellationToken cancellationToken = default)
     {
         var normalizedType = ReporteWhatsappTipos.Normalize(tipoReporte);
         if (ReporteWhatsappTipos.IsBoleta(normalizedType))
@@ -94,6 +94,35 @@ public sealed class ReporteAutomaticoService : IReporteAutomaticoService
 
         var configuracion = await ObtenerConfiguracionAsync(normalizedType, cancellationToken);
         var periodo = BuildPeriodoActual(normalizedType, configuracion, null);
+        if (anio is not null && mes is not null && !ReporteWhatsappTipos.IsGerencial(normalizedType))
+        {
+            if (anio < 2000 || anio > 2100 || mes < 1 || mes > 12)
+            {
+                throw new InvalidOperationException("Año o mes no válido.");
+            }
+
+            var inicioMes = new DateTime(anio.Value, mes.Value, 1);
+            var finMes = new DateTime(anio.Value, mes.Value, DateTime.DaysInMonth(anio.Value, mes.Value));
+            var hoy = TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, ResolvePeruTimeZone()).Date;
+            if (inicioMes > hoy)
+            {
+                throw new InvalidOperationException("El mes seleccionado aún no empieza.");
+            }
+
+            if (finMes > hoy)
+            {
+                finMes = hoy;
+            }
+
+            periodo = new ReporteWhatsappPeriodoDto
+            {
+                FechaInicio = inicioMes.ToString("dd/MM/yyyy", CultureInfo.InvariantCulture),
+                FechaFin = finMes.ToString("dd/MM/yyyy", CultureInfo.InvariantCulture),
+                FechaProceso = finMes,
+                EtiquetaPeriodo = $"{inicioMes:dd/MM/yyyy} - {finMes:dd/MM/yyyy}",
+                Periodo = $"{inicioMes:MM/yyyy}"
+            };
+        }
 
         if (ReporteWhatsappTipos.IsGerencial(normalizedType))
         {
@@ -137,7 +166,7 @@ public sealed class ReporteAutomaticoService : IReporteAutomaticoService
             return (pdf, BuildFileName(normalizedType, empleado, periodo));
         }
 
-        throw new InvalidOperationException("Ningún empleado destino tiene asistencia en el período actual para generar la vista previa.");
+        throw new InvalidOperationException("Ningún empleado destino tiene asistencia en el período para generar la vista previa.");
     }
 
     public async Task<IReadOnlyList<ReporteMetaDestinatarioDto>> ObtenerDestinatariosMetaAsync(CancellationToken cancellationToken = default)

@@ -8,7 +8,7 @@ public interface IReporteAutomaticoService
     Task<ReporteWhatsappConfiguracionDto> ObtenerConfiguracionAsync(string tipoReporte, CancellationToken cancellationToken = default);
     Task<ReporteWhatsappPeriodoDto> ObtenerPeriodoActualAsync(CancellationToken cancellationToken = default);
     /// <summary>Genera el PDF que enviaría el job (sin enviarlo ni registrar log) para el empleado indicado o el primero con datos.</summary>
-    Task<(byte[] Pdf, string NombreArchivo)> GenerarVistaPreviaPdfAsync(string tipoReporte, int? idEmpleado = null, CancellationToken cancellationToken = default);
+    Task<(byte[] Pdf, string NombreArchivo)> GenerarVistaPreviaPdfAsync(string tipoReporte, int? idEmpleado = null, int? anio = null, int? mes = null, CancellationToken cancellationToken = default);
     Task<ReporteWhatsappDashboardDto> ObtenerDashboardAsync(string idUsuario, string tipoReporte, string? periodo = null, int topLogs = 200, CancellationToken cancellationToken = default);
     /// <summary>Listado completo del store sp_EmpleadoCj_Listar_Wup con la marca de habilitado para el envio por Meta.</summary>
     Task<IReadOnlyList<ReporteMetaDestinatarioDto>> ObtenerDestinatariosMetaAsync(CancellationToken cancellationToken = default);

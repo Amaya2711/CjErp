@@ -33,7 +33,7 @@ public sealed class ReportesWhatsappController : ControllerBase
     }
 
     [HttpGet("vista-previa-pdf")]
-    public async Task<IActionResult> VistaPreviaPdf([FromQuery] string? tipo = null, [FromQuery] int? idEmpleado = null, CancellationToken cancellationToken = default)
+    public async Task<IActionResult> VistaPreviaPdf([FromQuery] string? tipo = null, [FromQuery] int? idEmpleado = null, [FromQuery] int? anio = null, [FromQuery] int? mes = null, CancellationToken cancellationToken = default)
     {
         if (!await UsuarioAutorizadoAsync(cancellationToken))
         {
@@ -42,7 +42,7 @@ public sealed class ReportesWhatsappController : ControllerBase
 
         try
         {
-            var (pdf, nombreArchivo) = await _reporteAutomaticoService.GenerarVistaPreviaPdfAsync(ResolveTipo(tipo), idEmpleado, cancellationToken);
+            var (pdf, nombreArchivo) = await _reporteAutomaticoService.GenerarVistaPreviaPdfAsync(ResolveTipo(tipo), idEmpleado, anio, mes, cancellationToken);
             Response.Headers["Content-Disposition"] = $"inline; filename=\"{nombreArchivo}\"";
             return File(pdf, "application/pdf");
         }

@@ -2072,7 +2072,6 @@ export default function PagosV2Page() {
       window.clearTimeout(timer);
       controller.abort();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab, bandejaTieneFilas, appliedFilters.fechaDesde, appliedFilters.fechaHasta, refreshTick, kpiRefreshTick, actualizarTabTick, loadingData]);
 
   const activeRows = useMemo(
@@ -3939,6 +3938,56 @@ export default function PagosV2Page() {
     const info = getFicticioInfo(row);
     return info.visible > 0 ? (info.sub / info.visible) * 100 : 0;
   };
+  // Subtotal de Total Sitio / Total Visible: se suman por símbolo de moneda (S/, $, €…), igual que se muestran en cada
+  // celda, nunca mezclando monedas. Ambos valores son el total de Importar de la OT/sitio y se repiten en cada recibo
+  // de esa OT, por lo que CADA OT/sitio se cuenta UNA sola vez (misma clave que usa el SP para calcularlos:
+  // OT normalizada + cliente + proyecto + sitio + correlativo del sitio + tipo de trabajo + moneda; sin OT válida,
+  // el total es el del sitio). Si faltan datos de clave, la fila se cuenta sola para no omitir importes reales.
+  const sumarSitioVisible = (rows: PagoRow[]) => {
+    const acumulado: Record<string, { sitio: number; visible: number }> = {};
+    const contados = new Set<string>();
+    for (const row of rows) {
+      const info = getFicticioInfo(row);
+      const ot = (row.ot ?? "").trim();
+      const otNormalizada = ["", "0", "NULL"].includes(ot.toUpperCase()) ? "" : ot;
+      const claveCompleta = Boolean(row.idCliente && row.idProyecto && row.siteId?.trim());
+      const clave = claveCompleta
+        ? [
+            otNormalizada,
+            row.idCliente,
+            row.idProyecto,
+            row.siteId.trim(),
+            row.corSite ?? "",
+            (row.tipoTrabajo ?? "").trim(),
+            info.mixto ? "S/ (mixto)" : info.simbolo,
+          ].join("|")
+        : `fila:${row.id}`;
+      if (contados.has(clave)) continue;
+      contados.add(clave);
+
+      acumulado[info.simbolo] ??= { sitio: 0, visible: 0 };
+      acumulado[info.simbolo].sitio += info.bck;
+      acumulado[info.simbolo].visible += info.visible;
+    }
+    return acumulado;
+  };
+  const renderSitioVisible = (acumulado: Record<string, { sitio: number; visible: number }>) => {
+    const entradas = Object.entries(acumulado);
+    if (!showTotalSitio || entradas.length === 0) return null;
+    const texto = (pick: (valor: { sitio: number; visible: number }) => number) =>
+      entradas.map(([simbolo, valor]) => formatMontoFicticio(pick(valor), simbolo)).join(" · ");
+    return (
+      <span title="Cada OT o sitio se cuenta una sola vez, aunque tenga varios recibos">
+        Total Sitio: <strong>{totalesCargando ? "calculando…" : texto((valor) => valor.sitio)}</strong> | Total Visible:{" "}
+        <strong>{totalesCargando ? "calculando…" : texto((valor) => valor.visible)}</strong>
+      </span>
+    );
+  };
+  const sitioVisiblePie = useMemo(
+    () => sumarSitioVisible(checkedIds.length > 0 ? selectedRows : visibleRows),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [checkedIds.length, selectedRows, visibleRows]
+  );
   const barCell = (percent: number) => (
     <div style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: 16 }}>
       <div title={formatPercent(percent)} style={{ width: 112, height: 8, borderRadius: 999, background: "#E2E8F0", overflow: "hidden" }}>
@@ -4563,6 +4612,7 @@ export default function PagosV2Page() {
                         {currency}: <strong>Subtotal {formatCurrency(amounts.subtotal, currency)} | IGV {formatCurrency(amounts.igv, currency)} | Total {formatCurrency(amounts.total, currency)}</strong>
                       </span>
                     ))}
+                    {renderSitioVisible(sumarSitioVisible(rows))}
                   </span>
                 );
               }}
@@ -4581,6 +4631,7 @@ export default function PagosV2Page() {
                     </strong>
                   </span>
                 ))}
+                {renderSitioVisible(sitioVisiblePie)}
                 {checkedIds.length === 0 ? null : <span style={{ color: currentTheme.accent }}>Solo sobre registros seleccionados</span>}
               </div>
             </div>

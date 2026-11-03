@@ -23,6 +23,7 @@ import {
   listarMovimientosVacaciones,
   listarVacaciones,
   rechazarVacacion,
+  modificarFechasVacacion,
   type VacacionMovimientoListItem,
 } from "../../api/vacacionesService";
 import {
@@ -723,6 +724,7 @@ export default function VacacionesPage() {
   const puedeAccion = (clave: string) => !accesoRestringido || Boolean(permisosUsuario[clave]);
   const puedeAprobar = puedeAccion("button.aprobar");
   const puedeRechazar = puedeAccion("button.rechazar");
+  const puedeModificar = puedeAccion("button.modificar");
   const puedeActualizar = puedeAccion("button.actualizar");
   const tabsVisibles = ESTADO_TABS.filter((tab) => {
     const clave = TAB_ACTION_KEYS[tab.key];
@@ -1650,6 +1652,102 @@ export default function VacacionesPage() {
     }
   }
 
+  // Modificar fechas: solo solicitudes pendientes de validación (97/98/99), nunca aprobadas al 100 %.
+  const [editRow, setEditRow] = useState<VacacionRegistro | null>(null);
+  const [editInicio, setEditInicio] = useState("");
+  const [editFin, setEditFin] = useState("");
+  const [editError, setEditError] = useState<string | null>(null);
+  const [editSaving, setEditSaving] = useState(false);
+
+  // Días de las OTRAS solicitudes pendientes del mismo empleado (rangos distintos, sin repetir filas de la bandeja).
+  const editDiasOtrasPendientes = useMemo(() => {
+    if (!editRow) return 0;
+    const vistos = new Set<string>();
+    let total = 0;
+    for (const item of rows) {
+      if (item.idEmpleadoCj !== editRow.idEmpleadoCj || !isVacacionPendiente(item)) continue;
+      const inicio = formatDateForRequest(item.fechaInicio);
+      const fin = formatDateForRequest(item.fechaFin);
+      if (inicio === formatDateForRequest(editRow.fechaInicio) && fin === formatDateForRequest(editRow.fechaFin)) continue;
+      const clave = `${inicio}|${fin}`;
+      if (vistos.has(clave)) continue;
+      vistos.add(clave);
+      total += getDaysBetween(inicio, fin);
+    }
+    return total;
+  }, [editRow, rows]);
+
+  const editDiasNuevos = editInicio && editFin ? getDaysBetween(editInicio, editFin) : 0;
+  // Se mantiene visible mientras el rango tenga menos de 7 días (no solo al guardar).
+  const editRangoMensaje =
+    editDiasNuevos > 0 && editDiasNuevos < MIN_DIAS_SOLICITUD
+      ? `No se puede registrar menos de ${MIN_DIAS_SOLICITUD} días de vacaciones (seleccionó ${editDiasNuevos}). La fecha fin debe ser como mínimo el ${addDaysToIsoDate(editInicio, MIN_DIAS_SOLICITUD - 1)}.`
+      : null;
+  const editSaldo = editRow?.saldoVacaciones ?? null;
+  const editDisponible = editSaldo == null ? null : editSaldo - editDiasOtrasPendientes;
+
+  function openEditFechas(row: VacacionRegistro) {
+    setEditRow(row);
+    setEditInicio(formatDateForRequest(row.fechaInicio));
+    setEditFin(formatDateForRequest(row.fechaFin));
+    setEditError(null);
+  }
+
+  function closeEditFechas() {
+    if (editSaving) return;
+    setEditRow(null);
+    setEditError(null);
+  }
+
+  async function submitEditFechas() {
+    if (!editRow || editSaving) return;
+
+    const fechaInicio = formatDateForRequest(editRow.fechaInicio);
+    const fechaFin = formatDateForRequest(editRow.fechaFin);
+
+    if (!editInicio || !editFin) {
+      setEditError("Seleccione las nuevas fechas de inicio y fin.");
+      return;
+    }
+    if (editFin < editInicio) {
+      setEditError("La fecha fin no puede ser menor que la fecha inicio.");
+      return;
+    }
+    if (editInicio === fechaInicio && editFin === fechaFin) {
+      setEditError("Las fechas son iguales a las actuales.");
+      return;
+    }
+    if (editDiasNuevos < MIN_DIAS_SOLICITUD) {
+      setEditError(`No se puede registrar menos de ${MIN_DIAS_SOLICITUD} días de vacaciones (seleccionó ${editDiasNuevos}).`);
+      return;
+    }
+    if (editDisponible != null && editDiasNuevos > editDisponible) {
+      setEditError(
+        `Los días solicitados (${editDiasNuevos}) superan el saldo disponible (${editDisponible.toFixed(2)}): saldo ${editSaldo?.toFixed(2)} menos ${editDiasOtrasPendientes} día(s) en otras solicitudes pendientes.`
+      );
+      return;
+    }
+
+    setEditSaving(true);
+    setEditError(null);
+    try {
+      await modificarFechasVacacion({
+        idEmpleadoCj: editRow.idEmpleadoCj,
+        fechaInicio,
+        fechaFin,
+        nuevaFechaInicio: editInicio,
+        nuevaFechaFin: editFin,
+      });
+      setEditRow(null);
+      await loadRows();
+      window.alert("Fechas de vacaciones modificadas correctamente.");
+    } catch (saveError) {
+      setEditError(getHttpMessage(saveError, "No se pudo modificar las fechas."));
+    } finally {
+      setEditSaving(false);
+    }
+  }
+
   const movimientoColumns = useMemo<GridColumn<VacacionMovimientoRegistro>[]>(() => [
     {
       dataField: "nombreEmpleado",
@@ -2194,6 +2292,16 @@ export default function VacacionesPage() {
                 Aprobar
               </button>
             ) : null}
+            {puedeModificar && isVacacionPendiente(row) ? (
+              <button
+                type="button"
+                onClick={accionesFilaDeshabilitadas || procesando ? undefined : () => openEditFechas(row)}
+                disabled={accionesFilaDeshabilitadas || Boolean(procesando)}
+                style={actionButton("#FFFBEB", "#B45309", "#FDE68A", accionesFilaDeshabilitadas || Boolean(procesando))}
+              >
+                Modificar fechas
+              </button>
+            ) : null}
             {puedeRechazar ? (
               <button
                 type="button"
@@ -2208,7 +2316,7 @@ export default function VacacionesPage() {
         ),
       },
     ],
-    [accionesFilaDeshabilitadas, procesando, puedeAprobar, puedeRechazar]
+    [accionesFilaDeshabilitadas, procesando, puedeAprobar, puedeRechazar, puedeModificar]
   );
 
   const resumenDetalleColumns = useMemo<GridColumn<VacacionRegistro>[]>(
@@ -2471,6 +2579,54 @@ export default function VacacionesPage() {
           ) : null}
         </div>
       </SidePanelForm>
+
+      {editRow ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: 16 }}
+        >
+          <div style={{ background: "#FFFFFF", borderRadius: 20, padding: 24, width: "100%", maxWidth: 480, boxShadow: "0 24px 60px rgba(15,23,42,0.25)" }}>
+            <h3 style={{ margin: "0 0 4px", color: "#0F172A" }}>Modificar fechas de vacaciones</h3>
+            <div style={{ fontSize: 13, color: "#64748B", marginBottom: 16 }}>
+              {editRow.nombreEmpleado || `Empleado ${editRow.idEmpleadoCj}`} · actual: {formatDateDisplay(editRow.fechaInicio)} al {formatDateDisplay(editRow.fechaFin)}
+            </div>
+
+            <div style={panelFieldsGridStyle}>
+              <label style={fieldBlockStyle}>
+                <span style={labelStyle}>Nueva fecha inicio</span>
+                <input type="date" value={editInicio} onChange={(event) => setEditInicio(event.target.value)} style={inputStyle} disabled={editSaving} />
+              </label>
+              <label style={fieldBlockStyle}>
+                <span style={labelStyle}>Nueva fecha fin</span>
+                <input type="date" value={editFin} onChange={(event) => setEditFin(event.target.value)} style={inputStyle} disabled={editSaving} />
+              </label>
+            </div>
+
+            <div style={{ ...contextGridStyle, margin: "16px 0" }}>
+              <InfoItem label="Días solicitados" value={editDiasNuevos > 0 ? `${editDiasNuevos} día(s)` : "-"} />
+              <InfoItem label="Saldo" value={editSaldo == null ? "No disponible" : `${editSaldo.toFixed(2)} día(s)`} />
+              <InfoItem label="Días en otras pendientes" value={`${editDiasOtrasPendientes} día(s)`} />
+              <InfoItem label="Disponible" value={editDisponible == null ? "No disponible" : `${editDisponible.toFixed(2)} día(s)`} />
+            </div>
+
+            {editRangoMensaje || editError ? (
+              <div role="alert" style={rangeErrorStyle}>
+                {editRangoMensaje ?? editError}
+              </div>
+            ) : null}
+
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 16 }}>
+              <button type="button" onClick={closeEditFechas} disabled={editSaving} style={primaryButton("#FFFFFF", "#334155", "#CBD5E1", editSaving)}>
+                Cancelar
+              </button>
+              <button type="button" onClick={() => void submitEditFechas()} disabled={editSaving} style={primaryButton("#1D4ED8", "#FFFFFF", "#1D4ED8", editSaving)}>
+                {editSaving ? "Guardando..." : "Guardar cambios"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </AppPage>
   );
 }

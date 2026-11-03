@@ -44,7 +44,7 @@ import type { ConstanteOption } from "../../../models/constante";
 import type { EmpleadoCta } from "../../../models/empleadoCta";
 import type { FiltroOperativoValue } from "../../../models/filtroOperativo";
 import { getHttpErrorMessage } from "../../../utils/httpError";
-import { Eye, FileDown, FileText } from "lucide-react";import { buildPlanillaConsultaEstadosRequest, consultarGastosPagadosPorId, consultarPlanillaEstados } from "../../../api/planillaConsultaService";
+import { Eye, FileDown, FileText, SquarePen } from "lucide-react";import { buildPlanillaConsultaEstadosRequest, consultarGastosPagadosPorId, consultarPlanillaEstados } from "../../../api/planillaConsultaService";
 import GastosPage, { type GastoEditorRequest } from "../tesoreria/gastos";
 import DataGridPro from "../../../components/datagrid/DataGridPro";
 import OcResumenPanel from "./OcResumenPanel";
@@ -656,6 +656,38 @@ function distinctCabecerasPorOc(items: OrdenCompraCabeceraDto[]) {
 
   return Array.from(porOc.values());
 }
+// Exporta las filas del grid OC/Gastos con TODAS las columnas devueltas por la consulta (valores sin formatear).
+// `calculado` resuelve las columnas que el grid calcula en pantalla (saldos, avance) y no vienen en la consulta.
+async function exportOcGastosCompleto(
+  fileName: string,
+  rows: Record<string, unknown>[],
+  columnasGrid: string[],
+  calculado: (row: Record<string, unknown>, columna: string) => string | number | undefined
+) {
+  const columnas = columnasGrid.filter((columna) => columna !== "PagoNuevo");
+  rows.forEach((row) => {
+    Object.keys(row).forEach((key) => {
+      if (key.startsWith("__")) return;
+      if (!columnas.some((columna) => columna.toLowerCase() === key.toLowerCase())) columnas.push(key);
+    });
+  });
+  const valor = (row: Record<string, unknown>, columna: string): string | number => {
+    const resuelto = calculado(row, columna);
+    if (resuelto !== undefined) return resuelto;
+    const key = Object.keys(row).find((item) => item.toLowerCase() === columna.toLowerCase());
+    const raw = key ? row[key] : undefined;
+    if (raw === null || raw === undefined) return "";
+    if (typeof raw === "number") return raw;
+    if (typeof raw === "boolean") return raw ? "Sí" : "No";
+    return String(raw);
+  };
+  await exportToExcel(
+    fileName,
+    columnas.map((columna) => OC_GASTOS_COLUMN_LABELS[columna] ?? columna),
+    rows.map((row) => columnas.map((columna) => valor(row, columna)))
+  );
+}
+
 async function exportToExcel(fileName: string, headers: string[], rows: Array<Array<string | number>>) {
   const XLSX = await import("xlsx");
   const worksheet = XLSX.utils.aoa_to_sheet([headers, ...rows]);
@@ -881,7 +913,7 @@ export default function OcV2Page() {
   const [busqueda, setBusqueda] = useState("");
   const [estadoVista, setEstadoVista] = useState<EstadoVista>("todos");
   const [vistaOc, setVistaOc] = useState<VistaOc>("aprobacion");
-  const [reporteSubtab, setReporteSubtab] = useState<"listado" | "oc-gastos" | "resumen" | "relacion">("listado");
+  const [reporteSubtab, setReporteSubtab] = useState<"listado" | "oc-gastos" | "resumen" | "relacion">("oc-gastos");
   // Resumen gerencial: se monta la primera vez que se abre y se conserva para no repetir sus consultas.
   const [resumenVisitado, setResumenVisitado] = useState(false);
   useEffect(() => {
@@ -948,17 +980,8 @@ export default function OcV2Page() {
   const [rechazoSoloSinRecibos, setRechazoSoloSinRecibos] = useState(false);
   const [verificandoRechazoOc, setVerificandoRechazoOc] = useState<number | null>(null);
   const [aprobando, setAprobando] = useState(false);
-  const [reporteFiltros, setReporteFiltros] = useState<ReporteFiltros>({
-    solicitante: "",
-    responsable: "",
-    cliente: "",
-    proyecto: "",
-    site: "",
-    estado: "",
-    idOc: "",
-    fechaDesde: "",
-    fechaHasta: "",
-  });
+  // El Reporte abre en OC/Gastos: parte con los filtros por defecto de esa pestaña (estados incluidos).
+  const [reporteFiltros, setReporteFiltros] = useState<ReporteFiltros>(() => createReporteFiltros("oc-gastos"));
   const [reporteFiltrosPorTab, setReporteFiltrosPorTab] = useState<Record<string, ReporteFiltros>>({});
   const [responsablesReporteFiltro, setResponsablesReporteFiltro] = useState<string[]>([]);
   const [busquedaResponsableReporte, setBusquedaResponsableReporte] = useState("");
@@ -1053,8 +1076,8 @@ export default function OcV2Page() {
 
   const opcionesRegistroCargadasRef = useRef(false);
   useEffect(() => {
-    // En Registro los combos se cargan de inmediato: esperar a la bandeja (consulta pesada, ~10 s) los retrasaba.
-    if (!cabecerasListas && vistaOc !== "registro") return;
+    // En Registro y Reporte los combos se cargan de inmediato: esperar a la bandeja (consulta pesada, ~10 s) los retrasaba.
+    if (!cabecerasListas && vistaOc !== "registro" && vistaOc !== "reporte") return;
     if (opcionesRegistroCargadasRef.current) return;
     opcionesRegistroCargadasRef.current = true;
     const loadOptions = async () => {
@@ -1609,8 +1632,9 @@ export default function OcV2Page() {
 
   useEffect(() => {
     // El historial completo solo se necesita en Seguimiento de pagos.
-    // Relación tiene su propia consulta por rango de fechas (botón Buscar) y no necesita el historial completo.
-    if (vistaOc === "reporte" && reporteSubtab !== "relacion") void asegurarCabecerasCompletas();
+    // Relación y OC/Gastos tienen su propia consulta (botón Buscar / Aplicar filtros) y no necesitan el historial completo:
+    // al entrar a OC/Gastos no se carga nada hasta que el usuario aplique filtros.
+    if (vistaOc === "reporte" && reporteSubtab !== "relacion" && reporteSubtab !== "oc-gastos") void asegurarCabecerasCompletas();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- solo debe reaccionar al cambio de vista o subpestaña
   }, [vistaOc, reporteSubtab]);
 
@@ -2258,11 +2282,21 @@ export default function OcV2Page() {
   }, []);
 
   const syncDraftBuffer = useCallback(() => {
+    setDraft((prev) => {
+      const diasPago = resolveBufferedValue(diasPagoInputRef.current, prev.diasPago);
+      return diasPago === prev.diasPago
+        ? prev
+        : { ...prev, diasPago, detalles: prev.detalles.map((item) => ({ ...item, diasPago })) };
+    });
+  }, []);
+
+  // Comprobante, tipo de pago, moneda y días de pago son de la cabecera: al cambiarlos se replican en todas las posiciones.
+  const cambiarCondicionCabecera = (campo: "comprobante" | "formaPago" | "moneda", valor: string) =>
     setDraft((prev) => ({
       ...prev,
-      diasPago: resolveBufferedValue(diasPagoInputRef.current, prev.diasPago),
+      [campo]: valor,
+      detalles: prev.detalles.map((item) => ({ ...item, [campo]: valor })),
     }));
-  }, []);
 
   const syncDetalleBuffer = useCallback(() => {
     setDetalleForm((prev) => ({
@@ -2321,14 +2355,16 @@ export default function OcV2Page() {
     setEditingOcId(null);
   };
 
-  const abrirEdicionOc = async () => {
-    if (!selectedCabecera?.idOc || loadingOcForEdit) return;
+  // `idOcParam` permite abrir la edición desde una fila (pestaña Relación) sin depender de la OC seleccionada.
+  const abrirEdicionOc = async (idOcParam?: number) => {
+    const idOcEdicion = idOcParam ?? selectedCabecera?.idOc;
+    if (!idOcEdicion || loadingOcForEdit) return;
 
     setLoadingOcForEdit(true);
     setError("");
     try {
       const [oc, gestores] = await Promise.all([
-        obtenerOrdenCompraEdicion(selectedCabecera.idOc),
+        obtenerOrdenCompraEdicion(idOcEdicion),
         listarGestorOptions(),
       ]);
       setGestorOptions(gestores);
@@ -2338,10 +2374,30 @@ export default function OcV2Page() {
         .catch(() => [] as ConstanteOption[]);
       const idValidadorOc = String(oc.idValidador ?? "");
       const incluyeValidador = validadoresOc.some((option) => normalizeOptionValue(option) === idValidadorOc);
-      const validadorGuardado = incluyeValidador || !idValidadorOc
+      // Nombres de la cabecera ya cargada (bandeja/Relación) para mostrar solicitante y validador aunque no estén en los combos.
+      const cabeceraOc = [...cabeceras, ...relacionRows].find((item) => item.idOc === oc.idOc);
+      const opcionDeRespaldo = (id: number, nombre: string | null | undefined, campo: string): ConstanteOption => ({
+        value: String(id),
+        codigo: String(id),
+        label: (nombre ?? "").trim() || `${campo} ${id}`,
+        valor: String(id),
+        campo,
+        orden: 0,
+        responsableCj: "",
+      });
+      let validadorGuardado = incluyeValidador || !idValidadorOc
         ? []
         : [...gestores, ...validadorOptions].filter((option) => normalizeOptionValue(option) === idValidadorOc).slice(0, 1);
+      if (!incluyeValidador && idValidadorOc && Number(idValidadorOc) > 0 && validadorGuardado.length === 0) {
+        validadorGuardado = [opcionDeRespaldo(oc.idValidador, cabeceraOc?.validador ?? cabeceraOc?.validadorCabecera, "validador")];
+      }
       setValidadoresSolicitanteOptions([...validadoresOc, ...validadorGuardado]);
+      // El solicitante guardado debe existir en el combo (la lista depende del cargo del usuario o de otro catálogo).
+      if (oc.idSolicitante > 0) {
+        setSolicitanteOptions((prev) => prev.some((option) => normalizeOptionValue(option) === String(oc.idSolicitante))
+          ? prev
+          : [...prev, opcionDeRespaldo(oc.idSolicitante, cabeceraOc?.solicitante ?? cabeceraOc?.solicitanteCabecera, "solicitante")]);
+      }
       const fechaOrden = oc.fechaOrden ? oc.fechaOrden.slice(0, 10) : today;
       const detallesCargados: OrdenCompraDraftDetalle[] = oc.detalle.map((item, index) => ({
         ...createEmptyDetalle(),
@@ -2510,10 +2566,8 @@ export default function OcV2Page() {
     }
   };
 
-  useEffect(() => {
-    if (vistaOc !== "reporte" || reporteSubtab !== "oc-gastos" || solicitantesOcGastosCatalogo.length > 0) return;
-    void loadSolicitantesOcGastosGeneral();
-  }, [reporteSubtab, solicitantesOcGastosCatalogo.length, vistaOc]);
+  // El catálogo de solicitantes ya no se arma al entrar a OC/Gastos (consulta general sin filtros, muy pesada):
+  // el combo usa el catálogo liviano `solicitanteOptions`. `loadSolicitantesOcGastosGeneral` queda sin disparo automático.
 
   const validateDetalleForm = (detalleActual: OrdenCompraDraftDetalle) => {
     return (
@@ -3142,7 +3196,7 @@ export default function OcV2Page() {
     {
       dataField: "accionesRelacion",
       caption: "Acciones",
-      width: 80,
+      width: 120,
       alignment: "center",
       allowFiltering: false,
       allowHeaderFilter: false,
@@ -3151,19 +3205,34 @@ export default function OcV2Page() {
       allowGrouping: false,
       calculateCellValue: () => "",
       cellRender: (_value, item) => (
-        <button
-          type="button"
-          style={styles.smallDangerButton}
-          disabled={getEstadoVista(item) === "rechazadas" || rechazando || verificandoRechazoOc !== null}
-          title="Rechazar la OC (solo si no tiene recibos asociados)"
-          aria-label={`Rechazar OC ${item.idOc}`}
-          onClick={(event) => {
-            event.stopPropagation();
-            void solicitarRechazoRelacion(item);
-          }}
-        >
-          {verificandoRechazoOc === item.idOc ? "…" : "🗑"}
-        </button>
+        <span style={{ display: "inline-flex", gap: 6 }}>
+          <button
+            type="button"
+            style={styles.smallSecondaryButton}
+            disabled={getEstadoVista(item) === "rechazadas" || loadingOcForEdit || rechazando || verificandoRechazoOc !== null}
+            title="Modificar la orden de compra"
+            aria-label={`Modificar OC ${item.idOc}`}
+            onClick={(event) => {
+              event.stopPropagation();
+              void abrirEdicionOc(item.idOc);
+            }}
+          >
+            {loadingOcForEdit ? "…" : <SquarePen size={14} aria-hidden="true" style={{ display: "block" }} />}
+          </button>
+          <button
+            type="button"
+            style={styles.smallDangerButton}
+            disabled={getEstadoVista(item) === "rechazadas" || rechazando || verificandoRechazoOc !== null}
+            title="Rechazar la OC (solo si no tiene recibos asociados)"
+            aria-label={`Rechazar OC ${item.idOc}`}
+            onClick={(event) => {
+              event.stopPropagation();
+              void solicitarRechazoRelacion(item);
+            }}
+          >
+            {verificandoRechazoOc === item.idOc ? "…" : "🗑"}
+          </button>
+        </span>
       ),
     },
   ];
@@ -3327,6 +3396,30 @@ export default function OcV2Page() {
     const avanceOcFila = Math.min(1, Math.max(0, toNumber(leerOcGastos(row, "AvanceOc"))));
     const saldoAvanceOcFila = subtotalOcFila > 0 ? Math.max(0, (1 - avanceOcFila) * 100) : 0;
     return { subtotalOcFila, saldoSubtotalFila, saldoAvanceOcFila };
+  };
+
+  // Valores que el grid muestra y que no vienen tal cual en la consulta (para "Exportar Excel (todo)").
+  const valorExportOcGastos = (row: Record<string, unknown>, columna: string): string | number | undefined => {
+    const fila = row as OcGastosGridRow;
+    if (columna === "SubtotalOc" || columna === "SubtotalPlanilla") {
+      return toNumber(String(leerOcGastos(fila, columna) ?? "").replace(/,/g, ""));
+    }
+    if (columna === "AvanceOc") {
+      return Math.round(toNumber(leerOcGastos(fila, "AvanceOc")) * 10000) / 100;
+    }
+    if (columna === "DiferenciaSubtotal" || columna === "DiferenciaAvanceOc") {
+      const campo = columna === "DiferenciaSubtotal" ? "subtotal" : "avance";
+      const { saldoSubtotalFila, saldoAvanceOcFila } = saldosOcGastos(fila);
+      const editado = ocGastosSaldosEditables[claveSaldoOcGastos(fila)]?.[campo];
+      const numero = editado !== undefined && editado !== "" ? Number(editado) : campo === "subtotal" ? saldoSubtotalFila : saldoAvanceOcFila;
+      return Number.isFinite(numero) ? numero : "";
+    }
+    // Columnas con alias (estado, fecha, validaciones, moneda): mismo valor que muestra el grid.
+    if (["EstadoOc", "EstadoOcSemaforo", "FechaOc", "MonedaOc", "EstadoPlanilla", "PrimeraValidacion", "SegundaValidacion", "TerceraValidacion"].includes(columna)) {
+      const texto = leerOcGastos(fila, columna);
+      return texto === "—" ? "" : texto;
+    }
+    return undefined;
   };
 
   const renderSaldoOcGastos = (row: OcGastosGridRow, campo: "subtotal" | "avance") => {
@@ -3877,11 +3970,12 @@ export default function OcV2Page() {
             <button type="button" style={styles.secondaryButton} onClick={() => { setVistaOc("reporte"); setPanelOpen(false); }}>Reporte</button>
             <button type="button" style={styles.secondaryButton} onClick={() => {
               if (vistaOc === "reporte" && reporteSubtab === "oc-gastos") {
-                const columns = reportePlanillaColumns.slice(0, OC_GASTOS_MAX_COLUMNAS_VISIBLES);
-                void exportToExcel(
+                // Todas las columnas (incluye subtotal, saldo subtotal y saldo avance OC) de las filas filtradas del grid.
+                void exportOcGastosCompleto(
                   `oc_gastos_${today}.xlsx`,
-                  columns,
-                  (ocGastosFilasVisiblesRef.current ?? reportePlanillaRows).map((row) => columns.map((column) => getReportePlanillaColumnValue(row, column)))
+                  ocGastosFilasVisiblesRef.current ?? reportePlanillaRows,
+                  reportePlanillaColumns,
+                  valorExportOcGastos
                 );
                 return;
               }
@@ -4920,7 +5014,7 @@ export default function OcV2Page() {
           <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 8, marginTop: 6 }}>
             <Field>
               <Label>Comprobante</Label>
-              <select value={draft.comprobante} onChange={(event) => setDraft((prev) => ({ ...prev, comprobante: event.target.value }))} style={styles.input}>
+              <select value={draft.comprobante} onChange={(event) => cambiarCondicionCabecera("comprobante", event.target.value)} style={styles.input}>
                 <option value="">Seleccione...</option>
                 {comprobanteOptions.map((option) => (
                   <option key={`comp-${normalizeOptionValue(option)}`} value={normalizeOptionValue(option)}>{option.label}</option>
@@ -4929,7 +5023,7 @@ export default function OcV2Page() {
             </Field>
             <Field>
               <Label>Tipo de pago</Label>
-              <select value={draft.formaPago} onChange={(event) => setDraft((prev) => ({ ...prev, formaPago: event.target.value }))} style={styles.input}>
+              <select value={draft.formaPago} onChange={(event) => cambiarCondicionCabecera("formaPago", event.target.value)} style={styles.input}>
                 <option value="">Seleccione...</option>
                 {tipoPagoOptions.map((option) => (
                   <option key={`pago-${normalizeOptionValue(option)}`} value={normalizeOptionValue(option)}>{option.label}</option>
@@ -4938,7 +5032,7 @@ export default function OcV2Page() {
             </Field>
             <Field>
               <Label>Moneda</Label>
-              <select value={draft.moneda} onChange={(event) => setDraft((prev) => ({ ...prev, moneda: event.target.value }))} style={styles.input}>
+              <select value={draft.moneda} onChange={(event) => cambiarCondicionCabecera("moneda", event.target.value)} style={styles.input}>
                 <option value="">Seleccione...</option>
                 {monedaOptions.map((option) => (
                   <option key={`mon-${normalizeOptionValue(option)}`} value={normalizeOptionValue(option)}>{option.label}</option>
@@ -7193,6 +7287,16 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 11,
     fontWeight: 700,
     cursor: "not-allowed",
+  },
+  smallSecondaryButton: {
+    border: "1px solid #D1D5DB",
+    background: "#fff",
+    color: "#1F2937",
+    borderRadius: 8,
+    padding: "6px 10px",
+    fontSize: 11,
+    fontWeight: 700,
+    cursor: "pointer",
   },
   smallDangerButton: {
     border: "1px solid #FECACA",
