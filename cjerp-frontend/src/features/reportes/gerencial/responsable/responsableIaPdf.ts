@@ -481,6 +481,13 @@ function filasResumenOc(lista: Array<{ sitio: SitioAnalisis; oc: OcAnalisis }>, 
   return filas;
 }
 
+/** Agrupa conservando el orden de entrada; los grupos salen ordenados por nombre. */
+function agruparPorResponsable<T>(items: T[], nombre: (item: T) => string): Array<[string, T[]]> {
+  const mapa = new Map<string, T[]>();
+  items.forEach((item) => mapa.set(nombre(item), [...(mapa.get(nombre(item)) ?? []), item]));
+  return Array.from(mapa.entries()).sort((a, b) => a[0].localeCompare(b[0], "es"));
+}
+
 function subtituloSeccion(doc: Doc, pagina: Pagina, texto: string, color: Rgb = BLUE) {
   pagina.asegurar(10);
   doc.setFont("helvetica", "bold");
@@ -608,6 +615,8 @@ export async function generarInformePdf(ctx: ContextoIa): Promise<InformeGenerad
   const unSitio = sitios.length === 1 ? sitios[0] : null;
   const nombresResponsables = responsables.map((r) => r.nombre).join(" · ") || ctx.criterio;
   const multiSitio = sitios.length > 1;
+  const multiResp = responsables.length > 1;
+  const nombreResp = (oc: OcAnalisis) => oc.responsable || "SIN RESPONSABLE";
 
   const cabecera = `${truncar(nombresResponsables, 70)}  ·  ${unSitio ? truncar(unSitio.etiqueta, 40) : `${sitios.length} sitios`}`;
   const pagina = new Pagina(doc, cabecera);
@@ -657,28 +666,45 @@ export async function generarInformePdf(ctx: ContextoIa): Promise<InformeGenerad
   pagina.titulo("Resumen de OC", `(${totalOcs} OC · ${totalLineas} líneas de detalle)`);
   const listaOcs = sitios
     .flatMap((sitio) => sitio.ocs.map((oc) => ({ sitio, oc })))
-    .sort((a, b) => a.sitio.etiqueta.localeCompare(b.sitio.etiqueta, "es") || a.oc.idOc - b.oc.idOc);
+    .sort(
+      (a, b) =>
+        (multiResp ? nombreResp(a.oc).localeCompare(nombreResp(b.oc), "es") : 0) ||
+        a.sitio.etiqueta.localeCompare(b.sitio.etiqueta, "es") ||
+        a.oc.idOc - b.oc.idOc,
+    );
   if (listaOcs.length === 0) {
     vacio(doc, pagina, "No hay OC en el resultado.");
   } else {
     const o = multiSitio ? 1 : 0;
-    tabla(
-      doc,
-      autoTable,
-      pagina,
-      [...(multiSitio ? ["SITIO"] : []), "OC", "TAREAS", "APROBACIÓN", "ESTADO DE PAGO", "MONTO", "PAGADO", "SALDO", "% PAGADO"],
-      filasResumenOc(listaOcs, multiSitio),
-      {
-        chipCols: [o + 2, o + 3],
-        derecha: [o + 4, o + 5, o + 6, o + 7],
-        // Anchos fijos que suman 180 mm (con varios sitios, el resto queda para la columna SITIO).
-        anchos: multiSitio
-          ? { [o]: 14, [o + 1]: 30, [o + 2]: 20, [o + 3]: 26, [o + 4]: 19, [o + 5]: 19, [o + 6]: 19, [o + 7]: 12 }
-          : { [o]: 16, [o + 1]: 36, [o + 2]: 22, [o + 3]: 28, [o + 4]: 21, [o + 5]: 21, [o + 6]: 21, [o + 7]: 15 },
-        fontSize: o ? 6.5 : 7,
-        filaTotal: true,
-      },
-    );
+    const tablaResumen = (items: typeof listaOcs) =>
+      tabla(
+        doc,
+        autoTable,
+        pagina,
+        [...(multiSitio ? ["SITIO"] : []), "OC", "TAREAS", "APROBACIÓN", "ESTADO DE PAGO", "MONTO", "PAGADO", "SALDO", "% PAGADO"],
+        filasResumenOc(items, multiSitio),
+        {
+          chipCols: [o + 2, o + 3],
+          derecha: [o + 4, o + 5, o + 6, o + 7],
+          // Anchos fijos que suman 180 mm (con varios sitios, el resto queda para la columna SITIO).
+          anchos: multiSitio
+            ? { [o]: 14, [o + 1]: 30, [o + 2]: 20, [o + 3]: 26, [o + 4]: 19, [o + 5]: 19, [o + 6]: 19, [o + 7]: 12 }
+            : { [o]: 16, [o + 1]: 36, [o + 2]: 22, [o + 3]: 28, [o + 4]: 21, [o + 5]: 21, [o + 6]: 21, [o + 7]: 15 },
+          fontSize: o ? 6.5 : 7,
+          filaTotal: true,
+        },
+      );
+    if (multiResp) {
+      // Varios responsables: una tabla (con sus totales por moneda) por cada responsable.
+      agruparPorResponsable(listaOcs, ({ oc }) => nombreResp(oc)).forEach(([nombre, items]) => {
+        pagina.asegurar(30);
+        subtituloSeccion(doc, pagina, `Responsable: ${nombre} · ${items.length} OC`);
+        tablaResumen(items);
+        pagina.y += 2;
+      });
+    } else {
+      tablaResumen(listaOcs);
+    }
   }
 
   if (multiSitio) tablaSubtotalesPorSitio(doc, autoTable, pagina, sitios);
@@ -690,6 +716,10 @@ export async function generarInformePdf(ctx: ContextoIa): Promise<InformeGenerad
   listaOcs.forEach(({ sitio, oc }, indice) => {
     // Cada OC empieza en una página nueva para que su detalle y sus pagos no se mezclen con otra OC.
     if (indice > 0) pagina.nueva();
+    if (multiResp && (indice === 0 || nombreResp(listaOcs[indice - 1].oc) !== nombreResp(oc))) {
+      const delResp = listaOcs.filter((item) => nombreResp(item.oc) === nombreResp(oc));
+      subtituloSeccion(doc, pagina, `RESPONSABLE: ${nombreResp(oc)} · ${delResp.length} OC`, RED);
+    }
     const mostrar = multiSitio;
     bloqueOc(doc, autoTable, pagina, sitio, oc, mostrar, contextoEnlaces);
     const siguiente = listaOcs[indice + 1];
@@ -703,15 +733,16 @@ export async function generarInformePdf(ctx: ContextoIa): Promise<InformeGenerad
   if (pagosSinOc.length === 0) {
     vacio(doc, pagina, "No hay pagos sin OC asociada.");
   } else {
+    const tablaSinOc = (lista: typeof pagosSinOc) => {
     const totalesSinOc = new Map<string, number>();
-    pagosSinOc.forEach(({ p }) => totalesSinOc.set(p.moneda, (totalesSinOc.get(p.moneda) ?? 0) + p.monto));
+    lista.forEach(({ p }) => totalesSinOc.set(p.moneda, (totalesSinOc.get(p.moneda) ?? 0) + p.monto));
     tabla(
       doc,
       autoTable,
       pagina,
       [...(multiSitio ? ["SITIO"] : []), "PAGO", "F. DEPÓSITO", "SERIE", "NRO. OPERACIÓN", "SOLICITANTE", "RESPONSABLE", "PLANILLA.DETALLE", "MONTO", "ACCIÓN SUGERIDA"],
       [
-        ...pagosSinOc.map(({ s, p }) => [
+        ...lista.map(({ s, p }) => [
           ...(multiSitio ? [s.etiqueta] : []),
           String(p.correlativo),
           formatFecha(p.fechaDeposito) || "—",
@@ -741,6 +772,17 @@ export async function generarInformePdf(ctx: ContextoIa): Promise<InformeGenerad
         },
       },
     );
+    };
+    if (multiResp) {
+      agruparPorResponsable(pagosSinOc, ({ p }) => p.responsable || "SIN RESPONSABLE").forEach(([nombre, lista]) => {
+        pagina.asegurar(30);
+        subtituloSeccion(doc, pagina, `Responsable: ${nombre} · ${lista.length} pago(s)`);
+        tablaSinOc(lista);
+        pagina.y += 2;
+      });
+    } else {
+      tablaSinOc(pagosSinOc);
+    }
   }
 
   // ---- Anexo: índice de los PDF de las OC (el contenido de cada PDF se agrega al unir el archivo)

@@ -15,15 +15,45 @@ public class LogisticaEquiposController : ControllerBase
     private readonly ILogisticaEquiposService _service;
     private readonly ILogisticaSolicitudCorreoService _correo;
     private readonly ILogger<LogisticaEquiposController> _logger;
+    private readonly IServiceScopeFactory _scopeFactory;
 
     public LogisticaEquiposController(
         ILogisticaEquiposService service,
         ILogisticaSolicitudCorreoService correo,
-        ILogger<LogisticaEquiposController> logger)
+        ILogger<LogisticaEquiposController> logger,
+        IServiceScopeFactory scopeFactory)
     {
         _service = service;
         _correo = correo;
         _logger = logger;
+        _scopeFactory = scopeFactory;
+    }
+
+    /// <summary>
+    /// Envia el PDF de las solicitudes en segundo plano (scope propio): la accion de negocio ya esta grabada y no debe esperar a Graph/SMTP.
+    /// El resultado de cada envio queda en el log.
+    /// </summary>
+    private void EnviarCorreosEnSegundoPlano(IEnumerable<string> solicitudes)
+    {
+        var lista = solicitudes.Distinct().ToList();
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                using var scope = _scopeFactory.CreateScope();
+                var correo = scope.ServiceProvider.GetRequiredService<ILogisticaSolicitudCorreoService>();
+                foreach (var nro in lista)
+                {
+                    var (enviado, mensaje) = await correo.EnviarSolicitudAsync(nro, "PROGRAMACION DESPACHO EQUIPOS", CancellationToken.None);
+                    if (enviado) _logger.LogInformation("[LogisticaSolicitud] Correo de la solicitud {Nro} enviado.", nro);
+                    else _logger.LogWarning("[LogisticaSolicitud] Correo de la solicitud {Nro} NO enviado: {Mensaje}", nro, mensaje);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "[LogisticaSolicitud] Fallo el envio de correos en segundo plano.");
+            }
+        });
     }
 
     [HttpGet("materiales")]
@@ -125,17 +155,37 @@ public class LogisticaEquiposController : ControllerBase
             var resultado = await _service.RegistrarSolicitudAsync(request, ResolveUsuario(), ResolveIdEmpleadoCj(), cancellationToken);
             if (resultado.IdEstado == 3)
             {
-                var (enviado, mensaje) = await _correo.EnviarSolicitudAsync(resultado.NroSolicitud, "PROGRAMACION DESPACHO EQUIPOS", cancellationToken);
-                resultado.CorreoEnviado = enviado;
-                resultado.CorreoMensaje = mensaje;
+                EnviarCorreosEnSegundoPlano(new[] { resultado.NroSolicitud });
+                resultado.CorreoEnProceso = true;
             }
 
             return resultado;
         }, "registrar la solicitud");
 
+    /// <summary>Vista previa en PDF (marca de agua "SIN VALIDEZ") de una solicitud que todavía no se graba. No escribe en la base de datos.</summary>
+    [HttpPost("solicitud/previsualizar")]
+    public IActionResult PrevisualizarSolicitud([FromBody] LogisticaSolicitudPrevisualizarDto request)
+    {
+        if (request?.Detalle is null || request.Detalle.Count == 0)
+            return BadRequest(new { success = false, message = "No hay materiales para previsualizar." });
+
+        var pdf = _correo.GenerarVistaPrevia(request, ResolveUsuario());
+        return File(pdf, "application/pdf");
+    }
+
     [HttpPost("solicitud/por-aprobar")]
     public Task<IActionResult> PorAprobar([FromBody] LogisticaSolicitudPorAprobarConsultaDto request, CancellationToken cancellationToken = default)
         => Ejecutar(async () => await _service.ListarPorAprobarAsync(request, cancellationToken), "consultar las solicitudes por aprobar");
+
+    /// <summary>Historial de solicitudes en cualquier estado, con filtros (fechas, numero, estado, relacion, solicitante, usuario).</summary>
+    [HttpPost("solicitud/historial")]
+    public Task<IActionResult> HistorialSolicitudes([FromBody] LogisticaSolicitudHistorialConsultaDto request, CancellationToken cancellationToken = default)
+        => Ejecutar(async () => await _service.ListarHistorialSolicitudesAsync(request ?? new LogisticaSolicitudHistorialConsultaDto(), cancellationToken), "consultar el historial de solicitudes");
+
+    /// <summary>Rechaza solicitudes x aprobar (9) o sin aprobacion (3) desde el Historial: devuelve el stock a Disponible. No envia correo.</summary>
+    [HttpPost("solicitud/rechazar")]
+    public Task<IActionResult> RechazarSolicitudes([FromBody] LogisticaSolicitudRechazarDto request, CancellationToken cancellationToken = default)
+        => Ejecutar(async () => await _service.RechazarSolicitudesAsync(request, ResolveUsuario(), ResolveIdEmpleadoCj(), cancellationToken), "rechazar las solicitudes");
 
     [HttpGet("solicitud/{nroSolicitud}/detalle")]
     public Task<IActionResult> DetalleSolicitud(string nroSolicitud, CancellationToken cancellationToken = default)
@@ -149,15 +199,8 @@ public class LogisticaEquiposController : ControllerBase
             var resultado = await _service.AprobarSolicitudesAsync(request, ResolveUsuario(), ResolveIdEmpleadoCj(), cancellationToken);
             if (string.Equals(request.Accion, "APROBAR", StringComparison.OrdinalIgnoreCase))
             {
-                var fallos = new List<string>();
-                foreach (var nro in request.Solicitudes.Distinct())
-                {
-                    var (enviado, mensaje) = await _correo.EnviarSolicitudAsync(nro, "PROGRAMACION DESPACHO EQUIPOS", cancellationToken);
-                    if (enviado) resultado.CorreosEnviados++;
-                    else fallos.Add($"{nro}: {mensaje}");
-                }
-
-                resultado.CorreoMensaje = fallos.Count == 0 ? null : string.Join(" ", fallos);
+                EnviarCorreosEnSegundoPlano(request.Solicitudes);
+                resultado.CorreoEnProceso = true;
             }
 
             return resultado;

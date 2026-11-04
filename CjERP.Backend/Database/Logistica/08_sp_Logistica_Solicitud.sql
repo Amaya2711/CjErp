@@ -106,10 +106,7 @@ BEGIN
   IF ISNULL(@IdConEntrega1, 0) = 0 THROW 51211, 'Debe registrar al menos un responsable de entrega.', 1;
   IF @IdConEntrega2 IS NOT NULL AND @IdConEntrega2 = @IdConEntrega1 THROW 51211, 'Los responsables de entrega deben ser distintos.', 1;
 
-  -- El site destino no admite nuevas solicitudes si ya tiene procesos culminados (idbloqueo = 1).
-  IF EXISTS (SELECT 1 FROM dbo.DetSolicitud ds WHERE ds.IdDespacho = 1 AND SUBSTRING(CAST(ds.CodPap AS nvarchar(50)), 1, 2) IN (N'10', N'40')
-             AND ds.IdCliente = @IdCliente AND ds.IdSite = @IdSite AND ds.IdBloqueo = 1)
-    THROW 51203, 'El site ya tiene procesos culminados. Consulte con Gerencia.', 1;
+  -- Sin bloqueo por 'procesos culminados' (IdBloqueo): era una regla del sistema antiguo y se retiro a pedido de Logistica.
 
   IF EXISTS (SELECT 1 FROM @t x WHERE x.Correlativo IS NOT NULL AND NOT EXISTS
              (SELECT 1 FROM dbo.DetLogistica d WHERE d.Correlativo = x.Correlativo AND d.IdEstado = 2 AND CAST(d.CodPap AS nvarchar(50)) = x.CodPap))
@@ -153,11 +150,11 @@ BEGIN
     INSERT INTO dbo.CabSolicitud
       (IdCliente, IdProyecto, IdSite, CorreSite, TipoTrabajo, PedidoSap, NroSolicitud, IdSolicitud, ObsSolicitud, Region, Oc, IdZona, NroGuia,
        Observacion, Usuario, FechaCreacion, HoraCreacion, IdEstado, NombreCliente, NombreProyecto, NombreTrabajo,
-       FormaEnvio, RazonSocial, Ubigeo, Direccion, Referencia, IdConEntrega1, IdConEntrega2, IdSolicitante, IdMovimiento)
+       FormaEnvio, RazonSocial, Ubigeo, Direccion, Referencia, IdConEntrega1, IdConEntrega2, IdSolicitante, IdMovimiento, IdWeb)
     VALUES
       (@IdCliente, @IdProyecto, @IdSite, @CorreSite, @TipoTrabajo, @pedidoCab, @NroSolicitud, '', '', '', '', 0, '',
        '', @Usuario, @hoy, @ahora, @IdEstado, @nombreCliente, @nombreProyecto, @TipoTrabajo,
-       @FormaEnvio, @RazonSocial, @Ubigeo, @Direccion, ISNULL(@Referencia, N''), @IdConEntrega1, ISNULL(@IdConEntrega2, 0), @IdSolicitante, 1);
+       @FormaEnvio, @RazonSocial, @Ubigeo, @Direccion, ISNULL(@Referencia, N''), @IdConEntrega1, ISNULL(@IdConEntrega2, 0), @IdSolicitante, 1, 1);  -- IdWeb = 1: solicitud registrada desde la web (CabSolicitud.IdWeb)
 
     -- Detalle de destino (IdDespacho = 1). Posicion = indice de la fila (0..n-1), como el sistema antiguo.
     INSERT INTO dbo.DetSolicitud
@@ -458,7 +455,11 @@ BEGIN
          a.FechaCreacion,
          CAST(a.Usuario AS nvarchar(50))        AS Usuario,
          e1.NombreEmpleado                      AS Entrega1,
-         e2.NombreEmpleado                      AS Entrega2
+         e2.NombreEmpleado                      AS Entrega2,
+         CAST(e1.NroDocumento AS nvarchar(50))  AS Entrega1Documento,
+         CAST(e1.Telefono AS nvarchar(50))      AS Entrega1Telefono,
+         CAST(e2.NroDocumento AS nvarchar(50))  AS Entrega2Documento,
+         CAST(e2.Telefono AS nvarchar(50))      AS Entrega2Telefono
   FROM dbo.CabSolicitud a
   LEFT JOIN dbo.Cliente cl            ON cl.IdCliente = a.IdCliente
   LEFT JOIN dbo.Proyecto pr           ON pr.IdProyecto = a.IdProyecto

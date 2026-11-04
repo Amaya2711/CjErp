@@ -29,6 +29,8 @@ public class LogisticaEquiposService : ILogisticaEquiposService
     private const string SolicitudRegistrarSp = "dbo.sp_Logistica_Solicitud_Registrar";
     private const string SolicitudPorAprobarSp = "dbo.sp_Logistica_Solicitud_PorAprobar";
     private const string SolicitudDetalleSp = "dbo.sp_Logistica_Solicitud_Detalle";
+    private const string SolicitudRechazarSp = "dbo.sp_Logistica_Solicitud_Rechazar";
+    private const string SolicitudHistorialSp = "dbo.sp_Logistica_Solicitud_Historial";
     private const string SolicitudAprobarSp = "dbo.sp_Logistica_Solicitud_Aprobar";
     private const string SolicitudCorreoSp = "dbo.sp_Logistica_Solicitud_Correo";
     private const string CampoConsultarSp = "dbo.sp_Logistica_Campo_Consultar";
@@ -379,6 +381,32 @@ public class LogisticaEquiposService : ILogisticaEquiposService
                 commandTimeout: 120));
     }
 
+    public async Task<IEnumerable<LogisticaSolicitudHistorialDto>> ListarHistorialSolicitudesAsync(
+        LogisticaSolicitudHistorialConsultaDto consulta,
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = _sqlCommandFactory.CreateConnection();
+        return await connection.QueryAsync<LogisticaSolicitudHistorialDto>(
+            _sqlCommandFactory.Create(
+                SolicitudHistorialSp,
+                new
+                {
+                    FechaIni = consulta.FechaIni?.Date,
+                    FechaFin = consulta.FechaFin?.Date,
+                    NroSolicitud = NullIfWhiteSpace(consulta.NroSolicitud),
+                    consulta.IdEstado,
+                    consulta.IdCliente,
+                    consulta.IdProyecto,
+                    IdSite = NullIfWhiteSpace(consulta.IdSite),
+                    consulta.CorreSite,
+                    Solicitante = NullIfWhiteSpace(consulta.Solicitante),
+                    Usuario = NullIfWhiteSpace(consulta.Usuario),
+                },
+                CommandType.StoredProcedure,
+                cancellationToken,
+                commandTimeout: 120));
+    }
+
     public async Task<IEnumerable<LogisticaSolicitudDetalleDto>> ListarDetalleSolicitudAsync(
         string nroSolicitud,
         CancellationToken cancellationToken = default)
@@ -412,6 +440,30 @@ public class LogisticaEquiposService : ILogisticaEquiposService
         await using var connection = _sqlCommandFactory.CreateConnection();
         await EjecutarAsync(() => connection.ExecuteAsync(
             _sqlCommandFactory.Create(SolicitudAprobarSp, parametros, CommandType.StoredProcedure, cancellationToken, commandTimeout: 180)));
+
+        return new LogisticaSolicitudAprobarResultDto { Procesadas = parametros.Get<int?>("@Procesadas") ?? 0 };
+    }
+
+    public async Task<LogisticaSolicitudAprobarResultDto> RechazarSolicitudesAsync(
+        LogisticaSolicitudRechazarDto request,
+        string usuario,
+        int? idEmpleadoCj,
+        CancellationToken cancellationToken = default)
+    {
+        var posicion = NullIfWhiteSpace(request.Posicion);
+        if (posicion != null && request.Solicitudes.Count != 1)
+            throw new InvalidOperationException("Para rechazar una posicion indique una unica solicitud.");
+        var items = request.Solicitudes.Select(nro => new { nroSolicitud = nro, posicion });
+        var parametros = new DynamicParameters();
+        parametros.Add("@Items", JsonSerializer.Serialize(items, JsonOptions), DbType.String);
+        parametros.Add("@Observacion", NullIfWhiteSpace(request.Observacion), DbType.String);
+        parametros.Add("@Usuario", usuario, DbType.String);
+        parametros.Add("@IdEmpleadoCj", idEmpleadoCj, DbType.Int32);
+        parametros.Add("@Procesadas", dbType: DbType.Int32, direction: ParameterDirection.Output);
+
+        await using var connection = _sqlCommandFactory.CreateConnection();
+        await EjecutarAsync(() => connection.ExecuteAsync(
+            _sqlCommandFactory.Create(SolicitudRechazarSp, parametros, CommandType.StoredProcedure, cancellationToken, commandTimeout: 180)));
 
         return new LogisticaSolicitudAprobarResultDto { Procesadas = parametros.Get<int?>("@Procesadas") ?? 0 };
     }

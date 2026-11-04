@@ -87,8 +87,18 @@ public interface ILogisticaEquiposService
         LogisticaSolicitudPorAprobarConsultaDto consulta,
         CancellationToken cancellationToken = default);
 
+    Task<IEnumerable<LogisticaSolicitudHistorialDto>> ListarHistorialSolicitudesAsync(
+        LogisticaSolicitudHistorialConsultaDto consulta,
+        CancellationToken cancellationToken = default);
+
     Task<IEnumerable<LogisticaSolicitudDetalleDto>> ListarDetalleSolicitudAsync(
         string nroSolicitud,
+        CancellationToken cancellationToken = default);
+
+    Task<LogisticaSolicitudAprobarResultDto> RechazarSolicitudesAsync(
+        LogisticaSolicitudRechazarDto request,
+        string usuario,
+        int? idEmpleadoCj,
         CancellationToken cancellationToken = default);
 
     Task<LogisticaSolicitudAprobarResultDto> AprobarSolicitudesAsync(
@@ -121,4 +131,7 @@ public interface ILogisticaSolicitudCorreoService
         string nroSolicitud,
         string titulo,
         CancellationToken cancellationToken = default);
+
+    /// <summary>PDF de vista previa de una solicitud sin grabar, con marca de agua "SIN VALIDEZ". No consulta ni escribe en la base.</summary>
+    byte[] GenerarVistaPrevia(LogisticaSolicitudPrevisualizarDto solicitud, string usuario);
 }

@@ -222,12 +222,46 @@ export type SolicitudRegistrar = {
   items: SolicitudItem[];
 };
 
+/** Vista previa del PDF de una solicitud sin grabar: textos tal como se muestran en pantalla (no códigos). */
+export type SolicitudPrevisualizar = {
+  cabecera: {
+    idSite?: string;
+    nombreSite?: string;
+    nombreCliente?: string;
+    nombreProyecto?: string;
+    tipoTrabajo?: string;
+    solicitante?: string;
+    formaEnvio?: string;
+    razonSocial?: string;
+    ubigeo?: string;
+    direccion?: string;
+    referencia?: string;
+    entrega1?: string;
+    entrega2?: string;
+    entrega1Documento?: string;
+    entrega1Telefono?: string;
+    entrega2Documento?: string;
+    entrega2Telefono?: string;
+  };
+  detalle: {
+    pedidoSap?: string;
+    codPap: string;
+    nombreMaterial?: string;
+    unidadMedida?: string;
+    cantSap: number;
+    serie?: string;
+    nombreSiteOrigen?: string;
+  }[];
+};
+
 export type SolicitudRegistrarResultado = {
   nroSolicitud: string;
   /** 9 = pendiente de aprobación; 3 = sin aprobación. */
   idEstado: number;
   correoEnviado: boolean;
   correoMensaje?: string | null;
+  /** true = el correo se envía en segundo plano; el resultado queda en el log del servidor. */
+  correoEnProceso?: boolean;
 };
 
 export type SolicitudPorAprobarConsulta = { idCliente?: number; idProyecto?: number; idSite?: string; correSite?: number };
@@ -253,6 +287,22 @@ export type SolicitudPorAprobar = {
   idEstado: number;
 };
 
+/** Filtros del historial: sin fechas ni número, el servidor toma los últimos 30 días. Fechas en formato yyyy-MM-dd. */
+export type SolicitudHistorialConsulta = {
+  fechaIni?: string;
+  fechaFin?: string;
+  nroSolicitud?: string;
+  idEstado?: number;
+  idCliente?: number;
+  idProyecto?: number;
+  idSite?: string;
+  correSite?: number;
+  solicitante?: string;
+  usuario?: string;
+};
+
+export type SolicitudHistorial = SolicitudPorAprobar & { nomEstado?: string | null };
+
 export type SolicitudDetalle = {
   posicion?: string | null;
   correlativo?: string | null;
@@ -268,6 +318,8 @@ export type SolicitudDetalle = {
   nombreSiteOrigen?: string | null;
 };
 
+export type SolicitudRechazar = { solicitudes: string[]; observacion: string; posicion?: string };
+
 export type SolicitudAprobar = {
   solicitudes: string[];
   accion: "APROBAR" | "OBSERVAR";
@@ -275,7 +327,12 @@ export type SolicitudAprobar = {
   observacion?: string;
 };
 
-export type SolicitudAprobarResultado = { procesadas: number; correosEnviados: number; correoMensaje?: string | null };
+export type SolicitudAprobarResultado = {
+  procesadas: number;
+  correosEnviados: number;
+  correoMensaje?: string | null;
+  correoEnProceso?: boolean;
+};
 
 // ---- x Campo ----
 

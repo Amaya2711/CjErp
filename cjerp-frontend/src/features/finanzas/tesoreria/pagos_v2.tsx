@@ -295,6 +295,94 @@ const TAB_ACTION_KEYS: Record<PagoEstado, string> = {
   observadas: "tab.observadas",
 };
 
+function MultiSelectFiltro({
+  opciones,
+  seleccion,
+  onChange,
+  style,
+}: {
+  opciones: Array<{ codigo: string; nombre: string }>;
+  seleccion: string[];
+  onChange: (valores: string[]) => void;
+  style: React.CSSProperties;
+}) {
+  const [abierto, setAbierto] = useState(false);
+  const [texto, setTexto] = useState("");
+  const contenedorRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!abierto) return;
+    const cerrar = (event: MouseEvent) => {
+      if (contenedorRef.current && !contenedorRef.current.contains(event.target as Node)) setAbierto(false);
+    };
+    document.addEventListener("mousedown", cerrar);
+    return () => document.removeEventListener("mousedown", cerrar);
+  }, [abierto]);
+
+  const filtradas = opciones.filter((opcion) => normalizeText(opcion.nombre).includes(normalizeText(texto)));
+  const etiqueta =
+    seleccion.length === 0
+      ? "Todos"
+      : seleccion.length === 1
+        ? opciones.find((opcion) => opcion.codigo === seleccion[0])?.nombre ?? "1 seleccionado"
+        : `${seleccion.length} seleccionados`;
+  const alternar = (codigo: string) =>
+    onChange(seleccion.includes(codigo) ? seleccion.filter((item) => item !== codigo) : [...seleccion, codigo]);
+
+  return (
+    <div ref={contenedorRef} style={{ position: "relative" }}>
+      <button
+        type="button"
+        onClick={() => setAbierto((value) => !value)}
+        style={{ ...style, textAlign: "left", cursor: "pointer", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+      >
+        {etiqueta}
+      </button>
+      {abierto ? (
+        <div
+          style={{
+            position: "absolute",
+            top: "100%",
+            left: 0,
+            zIndex: 50,
+            minWidth: 260,
+            maxHeight: 300,
+            overflowY: "auto",
+            background: "#fff",
+            border: "1px solid #CBD5E1",
+            borderRadius: 6,
+            boxShadow: "0 8px 20px rgba(15,23,42,0.15)",
+            padding: 6,
+          }}
+        >
+          <input
+            type="text"
+            value={texto}
+            placeholder="Buscar..."
+            autoFocus
+            onChange={(event) => setTexto(event.target.value)}
+            style={{ width: "100%", boxSizing: "border-box", marginBottom: 6, padding: "4px 6px", fontSize: 12 }}
+          />
+          <button
+            type="button"
+            onClick={() => onChange([])}
+            style={{ border: "none", background: "none", color: "#1D4ED8", fontSize: 11, cursor: "pointer", padding: "2px 4px" }}
+          >
+            Quitar selección (Todos)
+          </button>
+          {filtradas.map((opcion) => (
+            <label key={opcion.codigo} style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12, padding: "3px 4px", cursor: "pointer" }}>
+              <input type="checkbox" checked={seleccion.includes(opcion.codigo)} onChange={() => alternar(opcion.codigo)} />
+              {opcion.nombre}
+            </label>
+          ))}
+          {filtradas.length === 0 ? <div style={{ fontSize: 12, color: "#64748B", padding: 4 }}>Sin resultados</div> : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function formatDateInputValue(date: Date) {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, "0");
@@ -2165,13 +2253,15 @@ export default function PagosV2Page() {
   useEffect(() => {
     const controller = new AbortController();
     const authUser = getAuthUser();
-    const idCargo = Number(authUser?.idCargo ?? 0);
+    // sp_ListarSolicitante compara este valor contra Constante PERMISOS (ValorIni = ids de ROL),
+    // por eso se envía el rol del usuario y no su cargo.
+    const idRol = Number(authUser?.idrol ?? 0);
     const idEmpleado = Number(authUser?.idEmpleado ?? authUser?.codEmp ?? 0);
 
     void Promise.allSettled([
       obtenerCatalogosPago(controller.signal),
       listarSolicitanteOptions({
-        idCargo: Number.isFinite(idCargo) && idCargo > 0 ? idCargo : null,
+        idCargo: Number.isFinite(idRol) && idRol > 0 ? idRol : null,
         idEmpleado: Number.isFinite(idEmpleado) && idEmpleado > 0 ? idEmpleado : null,
       }),
     ]).then(([catalogosResult, solicitantesResult]) => {
@@ -4473,20 +4563,12 @@ export default function PagosV2Page() {
             </label>
             <label style={styles.cabeceraCampo}>
               <span style={styles.cabeceraEtiqueta}>Solicitante</span>
-              <select
-                value={filters.solicitante[0] ?? ""}
-                onChange={(event) =>
-                  setFilters((prev) => ({ ...prev, solicitante: event.target.value ? [event.target.value] : [] }))
-                }
+              <MultiSelectFiltro
+                opciones={resumenOpciones.solicitantes}
+                seleccion={filters.solicitante}
+                onChange={(valores) => setFilters((prev) => ({ ...prev, solicitante: valores }))}
                 style={{ ...styles.cabeceraControl, minWidth: 220 }}
-              >
-                <option value="">Todos</option>
-                {resumenOpciones.solicitantes.map((solicitante) => (
-                  <option key={solicitante.codigo} value={solicitante.codigo}>
-                    {solicitante.nombre}
-                  </option>
-                ))}
-              </select>
+              />
             </label>
             <label style={styles.cabeceraCampo}>
               <span style={styles.cabeceraEtiqueta}>Responsable</span>

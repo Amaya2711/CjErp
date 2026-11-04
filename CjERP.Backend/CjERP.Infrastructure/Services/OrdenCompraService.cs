@@ -1190,6 +1190,7 @@ public class OrdenCompraService : IOrdenCompraService
 
         try
         {
+            var aprobacionDirecta = await EsAprobadorDirectoAsync(connection, transaction, request.CodigosUsuario, cancellationToken);
             var results = new List<OrdenCompraAprobacionResultDto>();
             foreach (var idOc in idsOc)
             {
@@ -1211,16 +1212,42 @@ public class OrdenCompraService : IOrdenCompraService
                     throw new InvalidOperationException($"La orden de compra {idOc} esta rechazada y no puede aprobarse.");
                 }
 
-                var nivel = request.Nivel is >= 1 and <= 3
-                    ? request.Nivel.Value
-                    : ResolveNextApprovalLevel(snapshot);
+                int nivel;
+                if (aprobacionDirecta)
+                {
+                    // Usuario de "permiso_oc": se aprueba como si se presionara Aprobar nivel 3, sin exigir 1er y 2do aprobador.
+                    if (snapshot.IdAprobador3 is > 0)
+                    {
+                        throw new InvalidOperationException($"La orden de compra {idOc} ya tiene los tres niveles aprobados.");
+                    }
 
-                ValidateApprovalLevel(snapshot, nivel, idOc);
+                    nivel = 3;
+                }
+                else
+                {
+                    nivel = request.Nivel is >= 1 and <= 3
+                        ? request.Nivel.Value
+                        : ResolveNextApprovalLevel(snapshot);
+
+                    ValidateApprovalLevel(snapshot, nivel, idOc);
+                }
 
                 var idEstado = nivel == 3 ? 1 : 0;
                 var fecha = DateTime.Now;
                 var column = $"IdAprobador{nivel}";
                 var dateColumn = $"FechaAprobador{nivel}";
+
+                // En aprobación directa los niveles 1 y 2 aún vacíos se completan con el mismo aprobador y fecha
+                // (sin esto la OC seguiría figurando como pendiente de 1ra/2da validación).
+                var completarNiveles = aprobacionDirecta
+                    ? """
+                      ,
+                          IdAprobador1 = CASE WHEN ISNULL(IdAprobador1, 0) > 0 THEN IdAprobador1 ELSE @IdAprobador END,
+                          FechaAprobador1 = CASE WHEN ISNULL(IdAprobador1, 0) > 0 THEN FechaAprobador1 ELSE @Fecha END,
+                          IdAprobador2 = CASE WHEN ISNULL(IdAprobador2, 0) > 0 THEN IdAprobador2 ELSE @IdAprobador END,
+                          FechaAprobador2 = CASE WHEN ISNULL(IdAprobador2, 0) > 0 THEN FechaAprobador2 ELSE @Fecha END
+                      """
+                    : string.Empty;
 
                 await connection.ExecuteAsync(
                     new CommandDefinition(
@@ -1228,7 +1255,7 @@ public class OrdenCompraService : IOrdenCompraService
                         UPDATE dbo.CabOrdenCompra
                         SET IdEstado = @IdEstado,
                             {column} = @IdAprobador,
-                            {dateColumn} = @Fecha
+                            {dateColumn} = @Fecha{completarNiveles}
                         WHERE IdOc = @IdOc;
                         """,
                         new { IdOc = idOc, IdEstado = idEstado, IdAprobador = request.IdAprobador.Value, Fecha = fecha },
@@ -1237,7 +1264,7 @@ public class OrdenCompraService : IOrdenCompraService
                         commandTimeout: 120));
 
                 var detalleSet = nivel == 3
-                    ? $"{column} = @IdAprobador, {dateColumn} = @Fecha, IdEstado = 1"
+                    ? $"{column} = @IdAprobador, {dateColumn} = @Fecha, IdEstado = 1{completarNiveles}"
                     : $"{column} = @IdAprobador, {dateColumn} = @Fecha";
 
                 await connection.ExecuteAsync(
@@ -1268,6 +1295,49 @@ public class OrdenCompraService : IOrdenCompraService
             await transaction.RollbackAsync(cancellationToken);
             throw;
         }
+    }
+
+    // Constante "permiso_oc" (sp_Constante_ListarPorCampo): si ValorIni coincide con el código del usuario (IdUsuario o CodEmp),
+    // sus aprobaciones son directas. Un fallo de la consulta no bloquea: se aprueba por el flujo normal por niveles.
+    private async Task<bool> EsAprobadorDirectoAsync(
+        System.Data.Common.DbConnection connection,
+        System.Data.Common.DbTransaction transaction,
+        IReadOnlyCollection<string> codigosUsuario,
+        CancellationToken cancellationToken)
+    {
+        if (codigosUsuario.Count == 0)
+        {
+            return false;
+        }
+
+        try
+        {
+            var filas = await connection.QueryAsync(
+                new CommandDefinition(
+                    "dbo.sp_Constante_ListarPorCampo",
+                    new { campo = "permiso_oc" },
+                    transaction,
+                    commandType: CommandType.StoredProcedure,
+                    cancellationToken: cancellationToken,
+                    commandTimeout: 30));
+
+            foreach (var fila in filas)
+            {
+                var datos = (IDictionary<string, object?>)fila;
+                var valorIni = datos.FirstOrDefault(par => string.Equals(par.Key, "ValorIni", StringComparison.OrdinalIgnoreCase)).Value?.ToString()?.Trim();
+                if (!string.IsNullOrEmpty(valorIni)
+                    && codigosUsuario.Any(codigo => string.Equals(codigo, valorIni, StringComparison.OrdinalIgnoreCase)))
+                {
+                    return true;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "No se pudo leer la constante permiso_oc; la aprobación sigue el flujo normal por niveles.");
+        }
+
+        return false;
     }
 
     public async Task<IReadOnlyList<OrdenCompraCorreoAprobacionResultDto>> EnviarCorreoAprobacionFinalAsync(
@@ -1875,8 +1945,9 @@ public class OrdenCompraService : IOrdenCompraService
             .ToList();
 
         // Primer, segundo y tercer validador: Nombre1, Nombre2 y Nombre3 que devuelve
-        // sp_OrdenCompra_BuscarCabecera (aprobadores 1, 2 y 3 desde EmpleadoCj). Si la cabecera no los
-        // trae, se usan los de sp_OrdenCompra_BuscarDetalle (primer valor no vacío entre sus filas).
+        // sp_OrdenCompra_BuscarCabecera (siempre desde EmpleadoCj; por eso, más abajo, en OC con IdWeb 0/NULL
+        // se reemplazan por los de dbo.Empleado). Si la cabecera no los trae, se usan los de
+        // sp_OrdenCompra_BuscarDetalle (primer valor no vacío entre sus filas).
         static string PrimerNombre(params string?[] nombres) =>
             nombres.Select(nombre => nombre?.Trim()).FirstOrDefault(nombre => !string.IsNullOrWhiteSpace(nombre)) ?? string.Empty;
         cabecera.Validador = PrimerNombre(cabecera.Nombre1, PrimerNombre(detalle.Select(item => item.Nombre1).ToArray()));
@@ -1887,9 +1958,20 @@ public class OrdenCompraService : IOrdenCompraService
         try
         {
             var registrados = await BuscarAprobadoresRegistradosPdfAsync(idOc, cancellationToken);
-            if (!string.IsNullOrWhiteSpace(registrados.Validador1)) cabecera.Validador = registrados.Validador1;
-            if (!string.IsNullOrWhiteSpace(registrados.Validador2)) cabecera.Validador2 = registrados.Validador2;
-            if (!string.IsNullOrWhiteSpace(registrados.Validador3)) cabecera.Validador3 = registrados.Validador3;
+            if (registrados.SoloEmpleado)
+            {
+                // OC antigua (IdWeb 0 o nulo): solo valen los nombres de dbo.Empleado; no se usan los de EmpleadoCj
+                // que trae el SP (en Empleado el mismo ID es otra persona).
+                cabecera.Validador = registrados.Validador1;
+                cabecera.Validador2 = registrados.Validador2;
+                cabecera.Validador3 = registrados.Validador3;
+            }
+            else
+            {
+                if (!string.IsNullOrWhiteSpace(registrados.Validador1)) cabecera.Validador = registrados.Validador1;
+                if (!string.IsNullOrWhiteSpace(registrados.Validador2)) cabecera.Validador2 = registrados.Validador2;
+                if (!string.IsNullOrWhiteSpace(registrados.Validador3)) cabecera.Validador3 = registrados.Validador3;
+            }
         }
         catch (Exception ex)
         {
@@ -1980,27 +2062,19 @@ public class OrdenCompraService : IOrdenCompraService
                 .ToDictionary(group => group.Key, group => group.First().NombreEmpleado?.Trim() ?? string.Empty);
         }
 
-        // Validador 1: tabla según el IdWeb de la OC (EmpleadoCj si es web; Empleado si es del sistema antiguo).
-        var tablaValidador1 = aprobadores.IdWeb == 1 ? "dbo.EmpleadoCj" : "dbo.Empleado";
-        var nombres1 = await BuscarNombresAsync(
-            tablaValidador1,
-            aprobadores.IdAprobador1 is > 0 ? [aprobadores.IdAprobador1.Value] : []);
+        // Validadores 1, 2 y 3: tabla según el IdWeb de la OC (EmpleadoCj si IdWeb = 1; Empleado si es del sistema antiguo).
+        var tablaValidadores = aprobadores.IdWeb == 1 ? "dbo.EmpleadoCj" : "dbo.Empleado";
+        var nombres = await BuscarNombresAsync(tablaValidadores, ids);
 
-        // Validadores 2 y 3: se registran con el CodEmp del usuario que aprueba (EmpleadoCj), también en OC con
-        // IdWeb nulo o distinto de 1. Se buscan siempre en EmpleadoCj; en Empleado el mismo ID es otra persona.
-        var nombres23 = await BuscarNombresAsync(
-            "dbo.EmpleadoCj",
-            new[] { aprobadores.IdAprobador2, aprobadores.IdAprobador3 }
-                .Where(id => id is > 0)
-                .Select(id => id!.Value)
-                .Distinct()
-                .ToArray());
+        string NombreValidador(int? idAprobador) =>
+            idAprobador is > 0 && nombres.TryGetValue(idAprobador.Value, out var nombre) ? nombre : string.Empty;
 
         return new AprobadoresRegistradosPdf
         {
-            Validador1 = aprobadores.IdAprobador1 is > 0 && nombres1.TryGetValue(aprobadores.IdAprobador1.Value, out var nombre1) ? nombre1 : string.Empty,
-            Validador2 = aprobadores.IdAprobador2 is > 0 && nombres23.TryGetValue(aprobadores.IdAprobador2.Value, out var nombre2) ? nombre2 : string.Empty,
-            Validador3 = aprobadores.IdAprobador3 is > 0 && nombres23.TryGetValue(aprobadores.IdAprobador3.Value, out var nombre3) ? nombre3 : string.Empty,
+            SoloEmpleado = aprobadores.IdWeb != 1,
+            Validador1 = NombreValidador(aprobadores.IdAprobador1),
+            Validador2 = NombreValidador(aprobadores.IdAprobador2),
+            Validador3 = NombreValidador(aprobadores.IdAprobador3),
         };
     }
 
@@ -2156,6 +2230,8 @@ public class OrdenCompraService : IOrdenCompraService
 
     private sealed class AprobadoresRegistradosPdf
     {
+        /// <summary>OC del sistema antiguo (IdWeb 0 o nulo): los nombres salen solo de dbo.Empleado, sin respaldo de EmpleadoCj.</summary>
+        public bool SoloEmpleado { get; set; }
         public string Validador1 { get; set; } = string.Empty;
         public string Validador2 { get; set; } = string.Empty;
         public string Validador3 { get; set; } = string.Empty;

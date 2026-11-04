@@ -539,6 +539,11 @@ public class OrdenCompraController : ControllerBase
             request.IdsOc = idsOc.ToList();
             request.IdAprobador = idAprobador;
             request.Observacion = request.Observacion?.Trim() ?? string.Empty;
+            // Usuarios de Constante "permiso_oc" aprueban directo (equivale a Aprobar nivel 3): el servicio compara estos códigos.
+            request.CodigosUsuario = new[] { User.FindFirstValue("IdUsuario"), User.FindFirstValue("CodEmp") }
+                .Where(codigo => !string.IsNullOrWhiteSpace(codigo))
+                .Select(codigo => codigo!.Trim())
+                .ToList();
 
             var aprobaciones = await _ordenCompraService.AprobarAsync(request, cancellationToken);
             await _auditoriaCambiosService.RegistrarLoteAsync(

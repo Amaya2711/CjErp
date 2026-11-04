@@ -30,6 +30,29 @@ function formatErrorMessage(error: unknown) {
   }
 }
 
+const CHUNK_RELOAD_KEY = "chunkReloadAt";
+
+function isChunkLoadError(message: string) {
+  return /Failed to fetch dynamically imported module|Importing a module script failed|error loading dynamically imported module|Unable to preload CSS/i.test(
+    message
+  );
+}
+
+// Tras un despliegue, una pestaña abierta pide chunks con hash antiguo que ya no existen.
+// Se recarga una sola vez (máx. 1 cada 60 s) para tomar el index nuevo; si persiste, se muestra el error.
+function tryReloadForStaleChunk(message: string) {
+  if (!isChunkLoadError(message)) return false;
+  try {
+    const last = Number(sessionStorage.getItem(CHUNK_RELOAD_KEY) || 0);
+    if (Date.now() - last < 60_000) return false;
+    sessionStorage.setItem(CHUNK_RELOAD_KEY, String(Date.now()));
+  } catch {
+    return false;
+  }
+  window.location.reload();
+  return true;
+}
+
 class AppErrorBoundary extends React.Component<AppErrorBoundaryProps, AppErrorBoundaryState> {
   state: AppErrorBoundaryState = {
     hasError: false,
@@ -81,12 +104,14 @@ export default function AppRuntimeGuard({ children }: AppRuntimeGuardProps) {
   useEffect(() => {
     const handleWindowError = (event: ErrorEvent) => {
       const message = formatErrorMessage(event.error ?? event.message);
+      if (tryReloadForStaleChunk(message)) return;
       // La pantalla de recuperación gestiona el error; no se expone información en consola.
       setRuntimeError(message);
     };
 
     const handleUnhandledRejection = (event: PromiseRejectionEvent) => {
       const message = formatErrorMessage(event.reason);
+      if (tryReloadForStaleChunk(message)) return;
       // La pantalla de recuperación gestiona el rechazo; no se expone información en consola.
       setRuntimeError(message);
     };
@@ -107,6 +132,7 @@ export default function AppRuntimeGuard({ children }: AppRuntimeGuardProps) {
   return (
     <AppErrorBoundary
       onError={(error) => {
+        if (tryReloadForStaleChunk(error.message || "")) return;
         setRuntimeError(error.message || "Se produjo un error inesperado.");
       }}
     >

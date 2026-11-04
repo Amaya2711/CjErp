@@ -139,7 +139,9 @@ export default function PorAprobarTab() {
       });
       const correo =
         tipo === "APROBAR"
-          ? resultado.correoMensaje
+          ? resultado.correoEnProceso
+            ? " El correo con el PDF se está enviando en segundo plano."
+            : resultado.correoMensaje
             ? ` Correos enviados: ${resultado.correosEnviados}. ${resultado.correoMensaje}`
             : ` Correos enviados: ${resultado.correosEnviados}.`
           : "";

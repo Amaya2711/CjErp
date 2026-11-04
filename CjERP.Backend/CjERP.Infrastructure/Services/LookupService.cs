@@ -434,9 +434,30 @@ namespace CjERP.Infrastructure.Services
         {
             var data = (IDictionary<string, object>)row;
 
+            var idUbigeo = GetInt(data, "IdUbigeo", "idUbigeo", "Id", "id", "Codigo", "codigo",
+                "CodUbigeo", "codUbigeo", "CodigoUbigeo", "codigoUbigeo", "Ubigeo", "ubigeo");
+
+            // Respaldo: si el SP usa otro nombre de columna, se toma la primera columna cuyo nombre contenga "ubigeo" o "cod"/"id"
+            // y sea numérica (el código no puede quedar en 0 para todas las filas: el formulario no podría distinguirlas).
+            if (idUbigeo == 0)
+            {
+                foreach (var pair in data)
+                {
+                    var nombreColumna = pair.Key ?? string.Empty;
+                    var pareceCodigo = nombreColumna.StartsWith("cod", StringComparison.OrdinalIgnoreCase)
+                        || nombreColumna.StartsWith("id", StringComparison.OrdinalIgnoreCase);
+                    if (pareceCodigo && pair.Value != null && int.TryParse(Convert.ToString(pair.Value), out var numero) && numero != 0)
+                    {
+                        idUbigeo = numero;
+                        break;
+                    }
+                }
+            }
+
             return new UbigeoLookupDto
             {
-                IdUbigeo = GetInt(data, "IdUbigeo", "idUbigeo", "Id", "id", "Codigo", "codigo"),
+                IdUbigeo = idUbigeo,
+                CodUbigeo = GetString(data, "CodUbigeo", "codUbigeo"),
                 NombreUbigeo = GetStringAllowEmpty(
                     data,
                     "NombreUbigeo", "nombreUbigeo",

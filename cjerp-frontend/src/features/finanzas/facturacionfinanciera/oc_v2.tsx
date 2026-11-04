@@ -3057,14 +3057,19 @@ export default function OcV2Page() {
         observacion: `Aprobacion desde OC v1 - nivel ${nivelAprobacion}`,
       });
       setSelectedOcIds((prev) => prev.filter((idOc) => !idsAprobar.includes(idOc)));
+      // Usuarios con permiso_oc: el backend aprueba los tres niveles de una vez (responde nivel 3 aunque se presionó otro).
+      const aprobacionDirecta = nivelAprobacion !== 3
+        && (respuestaAprobacion.aprobaciones ?? []).length > 0
+        && (respuestaAprobacion.aprobaciones ?? []).every((item) => item.nivel === 3);
+      const nivelAprobado = aprobacionDirecta ? 3 : nivelAprobacion;
       const mensajeAprobacion =
         idsAprobar.length === 1
-          ? `Orden de compra ${idsAprobar[0]} aprobada en nivel ${nivelAprobacion}.`
-          : `${idsAprobar.length} ordenes de compra aprobadas en nivel ${nivelAprobacion}.`;
+          ? `Orden de compra ${idsAprobar[0]} aprobada en nivel ${nivelAprobado}${aprobacionDirecta ? " (aprobación directa)" : ""}.`
+          : `${idsAprobar.length} ordenes de compra aprobadas en nivel ${nivelAprobado}${aprobacionDirecta ? " (aprobación directa)" : ""}.`;
       const correosNivelFinal = respuestaAprobacion.correos ?? [];
       const correosNoEnviados = correosNivelFinal.filter((correo) => !correo.enviado);
       const mensajeCorreo = correosNivelFinal.length === 0
-        ? (nivelAprobacion === 3 ? " El correo de aprobación final se envía en segundo plano." : "")
+        ? (nivelAprobado === 3 ? " El correo de aprobación final se envía en segundo plano." : "")
         : correosNoEnviados.length === 0
           ? ` Correo enviado a ${correosNivelFinal.reduce((total, correo) => total + correo.destinatarios, 0)} destinatario(s).`
           : ` ${correosNoEnviados.map((correo) => correo.mensaje).join(" ")}`;
@@ -3646,6 +3651,58 @@ export default function OcV2Page() {
     allowSearch: false,
     allowGrouping: false,
   } as const;
+  type ReporteListadoRow = (typeof reporteRows)[number];
+  const reporteListadoColumns: GridColumn<ReporteListadoRow>[] = [
+    {
+      dataField: "__acciones",
+      caption: "Acciones",
+      width: 80,
+      fixed: true,
+      allowFiltering: false,
+      allowSorting: false,
+      allowHeaderFilter: false,
+      allowSearch: false,
+      allowGrouping: false,
+      calculateCellValue: () => "",
+      cellRender: (_value, item) => (
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 2 }} onClick={(event) => event.stopPropagation()}>
+          <button
+            type="button"
+            style={{ ...(pdfExportingOc === item.idOc ? styles.pdfIconButtonDisabled : styles.pdfIconButton), width: 22, height: 22, borderRadius: 6 }}
+            onClick={() => void exportReporteOcPdf(item)}
+            disabled={pdfExportingOc === item.idOc}
+            title="Exportar PDF de la OC"
+            aria-label={`Exportar PDF de la OC ${item.idOc}`}
+          >
+            <FileDown size={15} strokeWidth={2.3} />
+          </button>
+          <button
+            type="button"
+            style={{ ...styles.pdfIconButton, width: 22, height: 22, borderRadius: 6 }}
+            onClick={() => void visualizarDetalleReporteOc(item.idOc)}
+            title={`Mostrar detalle de la OC ${item.idOc}`}
+            aria-label={`Mostrar detalle de la OC ${item.idOc}`}
+          >
+            <FileText size={14} strokeWidth={2.3} />
+          </button>
+        </span>
+      ),
+    },
+    { dataField: "idOc", caption: "OC", dataType: "number", width: 90, alignment: "left" },
+    { dataField: "fecha", caption: "Fecha", width: 110, calculateCellValue: (item) => (item.fecha ? item.fecha.slice(0, 10) : ""), cellRender: (_v, item) => formatDate(item.fecha) },
+    { dataField: "clienteResumen", caption: "Cliente", width: 180, calculateCellValue: (item) => item.clienteResumen || "-" },
+    { dataField: "proyectoResumen", caption: "Proyecto", width: 180, calculateCellValue: (item) => item.proyectoResumen || "-" },
+    { dataField: "siteResumen", caption: "Site", width: 180, calculateCellValue: (item) => item.siteResumen || "-" },
+    { dataField: "tipoTrabajoResumen", caption: "Tipo trabajo", width: 140, calculateCellValue: (item) => item.tipoTrabajoResumen || "-" },
+    { dataField: "tareaResumen", caption: "Tarea", width: 140, calculateCellValue: (item) => item.tareaResumen || "-" },
+    { dataField: "solicitante", caption: "Solicitante", width: 180 },
+    { dataField: "comprobante", caption: "Comprobante", width: 120 },
+    { dataField: "subtotal", caption: "Subtotal", dataType: "number", width: 120, alignment: "right", calculateCellValue: (item) => toNumber(item.subtotal), cellRender: (_v, item) => formatMonto4(item.subtotal) },
+    { dataField: "estado", caption: "Estado", width: 130 },
+    { dataField: "idAprobador1", caption: "1ra validación", width: 110, alignment: "center", allowHeaderFilter: false, calculateCellValue: (item) => item.idAprobador1 ?? null, cellRender: (_v, item) => <ValidationBadge value={item.idAprobador1} /> },
+    { dataField: "idAprobador2", caption: "2da validación", width: 110, alignment: "center", allowHeaderFilter: false, calculateCellValue: (item) => item.idAprobador2 ?? null, cellRender: (_v, item) => <ValidationBadge value={item.idAprobador2} /> },
+    { dataField: "idAprobador3", caption: "3ra validación", width: 110, alignment: "center", allowHeaderFilter: false, calculateCellValue: (item) => item.idAprobador3 ?? null, cellRender: (_v, item) => <ValidationBadge value={item.idAprobador3} /> },
+  ];
   const ocGastosGridColumns: GridColumn<OcGastosGridRow>[] = [
     {
       dataField: "__acciones",
@@ -3977,6 +4034,33 @@ export default function OcV2Page() {
                   reportePlanillaColumns,
                   valorExportOcGastos
                 );
+                return;
+              }
+              if (vistaOc === "reporte" && reporteSubtab === "listado") {
+                // Todas las filas filtradas del Listado y todas sus columnas de datos (sin la de acciones).
+                const columnasExcel = reporteListadoColumns.filter((column) => column.dataField !== "__acciones");
+                const validacion = (valor?: number | null) => (valor && valor > 0 ? `Registrado (${valor})` : "Pendiente");
+                const filasExcel = reporteRowsFiltradas.map((item) => [
+                  item.idOc,
+                  item.fecha ? item.fecha.slice(0, 10) : "",
+                  item.clienteResumen || "",
+                  item.proyectoResumen || "",
+                  item.siteResumen || "",
+                  item.tipoTrabajoResumen || "",
+                  item.tareaResumen || "",
+                  item.solicitante ?? "",
+                  item.comprobante ?? "",
+                  toNumber(item.subtotal),
+                  item.estado ?? "",
+                  validacion(item.idAprobador1),
+                  validacion(item.idAprobador2),
+                  validacion(item.idAprobador3),
+                ]);
+                void exportToExcel(
+                  `oc_seguimiento_pagos_${today}.xlsx`,
+                  columnasExcel.map((column) => column.caption ?? column.dataField),
+                  filasExcel
+                ).then(() => setMessage(`Excel exportado: ${filasExcel.length} registros y ${columnasExcel.length} columnas.`));
                 return;
               }
               // Si el historial no llega (error), se cancela la exportación pendiente para que no se dispare después.
@@ -4421,83 +4505,23 @@ export default function OcV2Page() {
                 />
               </div>
             ) : (
-            <div style={{ ...styles.tableWrap, flex: 1, minHeight: 0, overflow: "auto" }}>
-              <style>{`.reporte-grid thead th { position: sticky; top: 0; z-index: 3; background: #fff; }`}</style>
-              <table className="reporte-grid" style={styles.table}>
-                <thead>
-                  <tr>
-                    <th style={{ ...styles.th, width: 88 }} aria-label="Acciones">Acciones</th>
-                    <th style={styles.th}>OC</th>
-                    <th style={styles.th}>Fecha</th>
-                    <th style={styles.th}>Cliente</th>
-                    <th style={styles.th}>Proyecto</th>
-                    <th style={styles.th}>Site</th>
-                    <th style={styles.th}>Tipo trabajo</th>
-                    <th style={styles.th}>Tarea</th>
-                    <th style={styles.th}>Solicitante</th>
-                    <th style={styles.th}>Comprobante</th>
-                    <th style={styles.th}>Subtotal</th>
-                    <th style={styles.th}>Estado</th>
-                    <th style={styles.th}>1ra validación</th>
-                    <th style={styles.th}>2da validación</th>
-                    <th style={styles.th}>3ra validación</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {!reporteConsultado ? (
-                    <tr>
-                      <td style={styles.td} colSpan={15}>
-                        Seleccione al menos un filtro para consultar la trazabilidad.
-                      </td>
-                    </tr>
-                  ) : String(reporteSubtab) !== "oc-gastos" && reporteRowsFiltradas.length === 0 ? (
-                    <tr>
-                      <td style={styles.td} colSpan={15}>
-                        {reporteLoading ? "Cargando datos del reporte..." : "No hay ordenes de compra para los filtros seleccionados."}
-                      </td>
-                    </tr>
-                  ) : String(reporteSubtab) !== "oc-gastos" ? reporteRowsFiltradas.map((item) => (
-                    <tr key={`rep-${item.idOc}`} style={styles.tr}>
-                      <td style={{ ...styles.td, width: 88, whiteSpace: "nowrap" }}>
-                        <button
-                          type="button"
-                          style={pdfExportingOc === item.idOc ? styles.pdfIconButtonDisabled : styles.pdfIconButton}
-                          onClick={() => void exportReporteOcPdf(item)}
-                          disabled={pdfExportingOc === item.idOc}
-                          title="Exportar PDF de la OC"
-                          aria-label={`Exportar PDF de la OC ${item.idOc}`}
-                        >
-                          <FileDown size={15} strokeWidth={2.3} />
-                        </button>
-                        <button
-                          type="button"
-                          style={{ ...styles.pdfIconButton, marginLeft: 5 }}
-                          onClick={() => void visualizarDetalleReporteOc(item.idOc)}
-                          title={`Mostrar detalle de la OC ${item.idOc}`}
-                          aria-label={`Mostrar detalle de la OC ${item.idOc}`}
-                        >
-                          <FileText size={14} strokeWidth={2.3} />
-                        </button>
-                      </td>
-                      <td style={styles.td}>{item.idOc}</td>
-                      <td style={styles.td}>{formatDate(item.fecha)}</td>
-                      <td style={styles.td} title={item.clientes.join(" / ")}>{item.clienteResumen || "-"}</td>
-                      <td style={styles.td} title={item.proyectos.join(" / ")}>{item.proyectoResumen || "-"}</td>
-                      <td style={styles.td} title={item.sites.join(" / ")}>{item.siteResumen || "-"}</td>
-                      <td style={styles.td} title={item.tipoTrabajoResumen}>{item.tipoTrabajoResumen || "-"}</td>
-                      <td style={styles.td} title={item.tareaResumen}>{item.tareaResumen || "-"}</td>
-                      <td style={styles.td}>{item.solicitante}</td>
-                      <td style={styles.td}>{item.comprobante}</td>
-                      <td style={styles.td}>{formatMonto4(item.subtotal)}</td>
-                      <td style={styles.td}>{item.estado}</td>
-                      <td style={styles.td}><ValidationBadge value={item.idAprobador1} /></td>
-                      <td style={styles.td}><ValidationBadge value={item.idAprobador2} /></td>
-                      <td style={styles.td}><ValidationBadge value={item.idAprobador3} /></td>
-                    </tr>
-                  )) : null}
-                </tbody>
-              </table>
-            </div>
+              <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
+                <DataGridPro<ReporteListadoRow>
+                  key="reporte-listado-grid"
+                  dataSource={reporteRowsFiltradas}
+                  keyExpr="idOc"
+                  columns={reporteListadoColumns}
+                  height="fill"
+                  loading={reporteLoading}
+                  noDataText={!reporteConsultado ? "Seleccione al menos un filtro para consultar la trazabilidad." : "No hay ordenes de compra para los filtros seleccionados."}
+                  stateStoringKey="oc-v2-reporte-listado"
+                  paging={{ pageSize: 100, pageSizes: [50, 100, 250, 500] }}
+                  allowExport={false}
+                  showSearchPanel={false}
+                  rowAlternation={false}
+                  rowPadding="3px 8px"
+                />
+              </div>
             )}
           </div>
           {resumenVisitado ? (

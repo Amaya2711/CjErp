@@ -1,11 +1,14 @@
 import { useState, type ReactNode } from "react";
 import AppPage from "../../../../components/base/AppPage";
+import { AccionesPaginaContext } from "./accionesPagina";
 
 export type EtapaTab = {
   key: string;
   label: string;
   /** Contenido de la etapa; si falta, la pestaña se muestra deshabilitada (pendiente de construir). */
   content?: ReactNode;
+  /** La etapa publica sus botones de acción principales en el pie de la página (ver AccionesPaginaContext). */
+  conAcciones?: boolean;
 };
 
 type EtapasPageProps = {
@@ -17,9 +20,16 @@ type EtapasPageProps = {
 export default function EtapasPage({ title, etapas }: EtapasPageProps) {
   const [tab, setTab] = useState(() => etapas.find((etapa) => etapa.content)?.key ?? etapas[0]?.key ?? "");
   const activa = etapas.find((etapa) => etapa.key === tab);
+  const [slotAcciones, setSlotAcciones] = useState<HTMLElement | null>(null);
 
   return (
-    <AppPage title={title} fillHeight>
+    <AppPage
+      title={title}
+      fillHeight
+      style={{ paddingTop: 6 }}
+    >
+      {/* Columna de alto completo: las grillas con height="fill" ocupan el alto de la página. */}
+      <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
       <div role="tablist" aria-label={title} style={styles.tabs}>
         {etapas.map((etapa) => {
           const disponible = Boolean(etapa.content);
@@ -44,7 +54,20 @@ export default function EtapasPage({ title, etapas }: EtapasPageProps) {
         })}
       </div>
 
-      {activa?.content ?? <div style={styles.empty}>Etapa pendiente de construir.</div>}
+      <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
+        <AccionesPaginaContext.Provider value={activa?.conAcciones ? slotAcciones : null}>
+          {activa?.content ?? <div style={styles.empty}>Etapa pendiente de construir.</div>}
+        </AccionesPaginaContext.Provider>
+      </div>
+
+      {/* Pie de página: aquí se publican (portal) los botones de acción principales de la etapa activa. */}
+      {activa?.conAcciones ? (
+        <>
+          <style>{".etapas-acciones-pie:empty{display:none}"}</style>
+          <div ref={setSlotAcciones} className="etapas-acciones-pie" style={styles.pie} />
+        </>
+      ) : null}
+      </div>
     </AppPage>
   );
 }
@@ -63,5 +86,6 @@ const styles = {
   },
   tabActive: { color: "#1f6f8b", borderBottom: "3px solid #1f6f8b" },
   tabDisabled: { color: "#94a3b8", cursor: "not-allowed", fontWeight: 400 },
+  pie: { display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 8, paddingTop: 10, marginTop: 8, borderTop: "1px solid #d8dee8" },
   empty: { color: "#64748b", fontSize: 13, padding: 16 },
 };

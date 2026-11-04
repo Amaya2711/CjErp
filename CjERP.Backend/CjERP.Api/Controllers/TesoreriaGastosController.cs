@@ -165,13 +165,15 @@ public class TesoreriaGastosController : ControllerBase
             string.IsNullOrWhiteSpace(request.CuentaInter) ||
             string.IsNullOrWhiteSpace(request.TipoCuenta) ||
             string.IsNullOrWhiteSpace(request.Banco) ||
-            string.IsNullOrWhiteSpace(request.NroDocumento) ||
-            request.IdBancoActual is not > 0 ||
-            string.IsNullOrWhiteSpace(request.CuentaActual) ||
-            string.IsNullOrWhiteSpace(request.NombreCtaActual))
+            string.IsNullOrWhiteSpace(request.NroDocumento))
         {
-            return BadRequest(new { success = false, message = "Nombre, cuenta, cuenta interbancaria, tipo de cuenta, banco, documento y los datos actuales de la cuenta son obligatorios." });
+            return BadRequest(new { success = false, message = "Nombre, cuenta, cuenta interbancaria, tipo de cuenta, banco y documento son obligatorios." });
         }
+
+        // Los datos actuales de la cuenta pueden venir vacíos (responsable sin cuenta o con datos incompletos).
+        request.IdBancoActual ??= 0;
+        request.CuentaActual ??= string.Empty;
+        request.NombreCtaActual ??= string.Empty;
 
         request.IdEmpleado = idEmpleado;
         request.Nombre = request.Nombre.Trim();

@@ -1,5 +1,7 @@
 import httpClient from "./httpClient";
 import type {
+  SolicitudHistorial,
+  SolicitudHistorialConsulta,
   CampoConsulta,
   CampoGrabarResultado,
   CampoItem,
@@ -20,8 +22,10 @@ import type {
   SecundarioItem,
   SolicitudAprobar,
   SolicitudAprobarResultado,
+  SolicitudRechazar,
   SolicitudCatalogo,
   SolicitudConsumible,
+  SolicitudPrevisualizar,
   SolicitudDetalle,
   SolicitudDisponible,
   SolicitudPorAprobar,
@@ -96,8 +100,13 @@ export async function listarDisponiblesSolicitud(params: {
   correSite?: number;
   idCliente?: number;
   idProyecto?: number;
+  /** Permite cancelar la consulta (por ejemplo, al escribir otra búsqueda). */
+  signal?: AbortSignal;
 }) {
+  // El backend permite 120 s (commandTimeout); el límite global de 30 s cortaba la búsqueda en otros sites.
   return await httpClient.get<SolicitudDisponible[]>("/logistica/equipos/solicitud/disponibles", {
+    timeout: 120000,
+    signal: params.signal,
     params: {
       texto: params.texto?.trim() || undefined,
       idSite: params.idSite || undefined,
@@ -108,14 +117,24 @@ export async function listarDisponiblesSolicitud(params: {
   });
 }
 
-export async function listarConsumiblesSolicitud(texto?: string) {
+export async function listarConsumiblesSolicitud(texto?: string, signal?: AbortSignal) {
   return await httpClient.get<SolicitudConsumible[]>("/logistica/equipos/solicitud/consumibles", {
+    signal,
     params: { texto: texto?.trim() || undefined },
   });
 }
 
+/** PDF de vista previa (marca de agua "SIN VALIDEZ") de la solicitud que se quiere grabar. No registra nada. */
+export async function previsualizarSolicitudEquipos(request: SolicitudPrevisualizar) {
+  return await httpClient.post<Blob>("/logistica/equipos/solicitud/previsualizar", request, { responseType: "blob", timeout: 60000 });
+}
+
 export async function registrarSolicitudEquipos(request: SolicitudRegistrar) {
   return await httpClient.post<SolicitudRegistrarResultado>("/logistica/equipos/solicitud/registrar", request, { timeout: 120000 });
+}
+
+export async function listarHistorialSolicitudes(consulta: SolicitudHistorialConsulta) {
+  return await httpClient.post<SolicitudHistorial[]>("/logistica/equipos/solicitud/historial", consulta, { timeout: 120000 });
 }
 
 export async function listarSolicitudesPorAprobar(consulta: SolicitudPorAprobarConsulta) {
@@ -134,6 +153,10 @@ export async function consultarCampo(consulta: CampoConsulta) {
 
 export async function grabarCampo(items: CampoItem[]) {
   return await httpClient.post<CampoGrabarResultado>("/logistica/equipos/campo/grabar", { items }, { timeout: 120000 });
+}
+
+export async function rechazarSolicitudesEquipos(request: SolicitudRechazar) {
+  return await httpClient.post<SolicitudAprobarResultado>("/logistica/equipos/solicitud/rechazar", request, { timeout: 120000 });
 }
 
 export async function aprobarSolicitudesEquipos(request: SolicitudAprobar) {

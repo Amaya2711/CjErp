@@ -132,18 +132,19 @@ export default function MantenimientoResponsablePage() {
 
   const editar = (item: EmpleadoResponsableBusqueda) => {
     const id = Number(item.idEmpleado);
-    const idBanco = Number(item.idBanco);
+    // Los datos bancarios pueden estar vacíos: justamente se edita para completarlos.
+    const idBanco = Number.isInteger(Number(item.idBanco)) && Number(item.idBanco) > 0 ? Number(item.idBanco) : 0;
     const tipoCuenta = obtenerTipoCuenta(item);
     const tipo = tiposCuenta.find((option) => normalizar(option.label) === normalizar(tipoCuenta));
     const banco = bancos.find((option) => String(option.value) === String(idBanco))
       ?? bancos.find((option) => normalizar(option.label) === normalizar(item.nombreBanco));
-    if (!Number.isInteger(id) || id <= 0 || !Number.isInteger(idBanco) || idBanco <= 0 || !item.cuenta?.trim() || !tipoCuenta) {
-      setError("La búsqueda no devolvió los datos bancarios requeridos para editar esta cuenta.");
+    if (!Number.isInteger(id) || id <= 0) {
+      setError("La búsqueda no devolvió el identificador del responsable.");
       return;
     }
     setIdEmpleado(id);
     setMostrarFormulario(true);
-    setOriginal({ idBanco, cuenta: item.cuenta.trim(), nombreCta: tipoCuenta });
+    setOriginal({ idBanco, cuenta: (item.cuenta ?? "").trim(), nombreCta: tipoCuenta });
     setForm({
       nombre: item.nombreEmpleado || item.nombre || "",
       cuenta: item.cuenta || "",

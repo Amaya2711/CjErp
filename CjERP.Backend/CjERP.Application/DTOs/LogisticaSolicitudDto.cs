@@ -86,6 +86,8 @@ public class LogisticaSolicitudRegistrarResultDto
     public int IdEstado { get; set; }
     public bool CorreoEnviado { get; set; }
     public string? CorreoMensaje { get; set; }
+    /// <summary>true = el correo se envia en segundo plano (el resultado queda en el log del servidor).</summary>
+    public bool CorreoEnProceso { get; set; }
 }
 
 public class LogisticaSolicitudPorAprobarConsultaDto
@@ -94,6 +96,26 @@ public class LogisticaSolicitudPorAprobarConsultaDto
     public int? IdProyecto { get; set; }
     public string? IdSite { get; set; }
     public int? CorreSite { get; set; }
+}
+
+/// <summary>Filtros del historial de solicitudes. Sin fechas ni numero de solicitud el SP toma los ultimos 30 dias.</summary>
+public class LogisticaSolicitudHistorialConsultaDto
+{
+    public DateTime? FechaIni { get; set; }
+    public DateTime? FechaFin { get; set; }
+    public string? NroSolicitud { get; set; }
+    public int? IdEstado { get; set; }
+    public int? IdCliente { get; set; }
+    public int? IdProyecto { get; set; }
+    public string? IdSite { get; set; }
+    public int? CorreSite { get; set; }
+    public string? Solicitante { get; set; }
+    public string? Usuario { get; set; }
+}
+
+public class LogisticaSolicitudHistorialDto : LogisticaSolicitudPorAprobarDto
+{
+    public string? NomEstado { get; set; }
 }
 
 public class LogisticaSolicitudPorAprobarDto
@@ -143,11 +165,22 @@ public class LogisticaSolicitudAprobarDto
     public string? Observacion { get; set; }
 }
 
+public class LogisticaSolicitudRechazarDto
+{
+    public List<string> Solicitudes { get; set; } = new();
+    /// <summary>Si viene, se rechaza solo esa posicion (exige una unica solicitud); si no, toda la solicitud.</summary>
+    public string? Posicion { get; set; }
+    /// <summary>Motivo del rechazo (obligatorio).</summary>
+    public string? Observacion { get; set; }
+}
+
 public class LogisticaSolicitudAprobarResultDto
 {
     public int Procesadas { get; set; }
     public int CorreosEnviados { get; set; }
     public string? CorreoMensaje { get; set; }
+    /// <summary>true = los correos se envian en segundo plano (el resultado queda en el log del servidor).</summary>
+    public bool CorreoEnProceso { get; set; }
 }
 
 /// <summary>Cabecera de la solicitud para el PDF y el correo.</summary>
@@ -173,6 +206,20 @@ public class LogisticaSolicitudCorreoCabDto
     public string? Usuario { get; set; }
     public string? Entrega1 { get; set; }
     public string? Entrega2 { get; set; }
+    public string? Entrega1Documento { get; set; }
+    public string? Entrega1Telefono { get; set; }
+    public string? Entrega2Documento { get; set; }
+    public string? Entrega2Telefono { get; set; }
+}
+
+/// <summary>
+/// Vista previa del PDF de una solicitud AÚN NO GRABADA: la pantalla envía los textos tal como los muestra (nombres, no códigos).
+/// No toca la base de datos; el PDF sale con la marca de agua "SIN VALIDEZ".
+/// </summary>
+public class LogisticaSolicitudPrevisualizarDto
+{
+    public LogisticaSolicitudCorreoCabDto Cabecera { get; set; } = new();
+    public List<LogisticaSolicitudDetalleDto> Detalle { get; set; } = new();
 }
 
 // ---- x Campo ----

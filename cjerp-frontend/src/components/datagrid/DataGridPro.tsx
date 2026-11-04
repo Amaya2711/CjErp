@@ -62,6 +62,8 @@ export type DataGridProProps<T extends object> = {
   editing?: {
     allowUpdating?: boolean;
     onCellChanged?: (event: CellChangedEvent<T>) => void;
+    /** Inicia la edición con un solo clic (por defecto: doble clic). */
+    editOnClick?: boolean;
   };
   summary?: { totalItems?: GridSummaryItem[]; groupItems?: GridSummaryItem[] };
   masterDetail?: (row: T) => React.ReactNode;
@@ -1031,6 +1033,9 @@ export default function DataGridPro<T extends object>({
                             ...stickyStyle(c, background),
                             textAlign: alignOf(c),
                             ...c.cellStyle?.(getCellValue(row, c, c.dataField), row),
+                          }}
+                          onClick={() => {
+                            if (editing?.editOnClick && canEdit(c)) setEditingCell({ key, field: c.dataField });
                           }}
                           onDoubleClick={() => {
                             if (canEdit(c)) setEditingCell({ key, field: c.dataField });

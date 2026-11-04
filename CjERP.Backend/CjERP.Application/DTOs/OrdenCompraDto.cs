@@ -220,6 +220,13 @@ public class OrdenCompraAprobarRequestDto
     public int? Nivel { get; set; }
     public int? IdAprobador { get; set; }
     public string Observacion { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Códigos del usuario autenticado (IdUsuario y CodEmp del JWT) para compararlos con Constante "permiso_oc".
+    /// Lo completa el controlador; el cliente no puede enviarlo.
+    /// </summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public List<string> CodigosUsuario { get; set; } = [];
 }
 
 public class OrdenCompraEditarDetalleRequestDto

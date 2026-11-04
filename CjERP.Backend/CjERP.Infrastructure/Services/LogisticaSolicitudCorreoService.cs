@@ -1,5 +1,6 @@
 using System.Data;
 using System.Text;
+using CjERP.Application.DTOs;
 using CjERP.Application.Interfaces.Services;
 using CjERP.Infrastructure.Persistence.Sql;
 using Dapper;
@@ -38,6 +39,15 @@ public sealed class LogisticaSolicitudCorreoService : ILogisticaSolicitudCorreoS
         _logger = logger;
     }
 
+    public byte[] GenerarVistaPrevia(LogisticaSolicitudPrevisualizarDto solicitud, string usuario)
+    {
+        var cab = solicitud.Cabecera;
+        cab.NroSolicitud = "SIN ASIGNAR";
+        cab.Usuario = usuario;
+        cab.FechaCreacion = DateTime.UtcNow.AddHours(-5); // America/Lima (UTC-5, sin horario de verano)
+        return new LogisticaSolicitudPdfDocument(cab, solicitud.Detalle, "SIN VALIDEZ").GeneratePdf();
+    }
+
     public async Task<(bool Enviado, string Mensaje)> EnviarSolicitudAsync(
         string nroSolicitud,
         string titulo,
@@ -60,6 +70,7 @@ public sealed class LogisticaSolicitudCorreoService : ILogisticaSolicitudCorreoS
             if (lista.Length == 0)
                 return (false, $"No hay destinatarios activos en Constante '{CampoBase}' (ValorFin = 1).");
 
+            _logger.LogInformation("[LogisticaSolicitud] Enviando la solicitud {Nro} a {Destinatarios}.", nroSolicitud, string.Join(", ", lista));
             var pdf = new LogisticaSolicitudPdfDocument(cab, detalle).GeneratePdf();
             var proyecto = (cab.NombreProyecto ?? string.Empty).Replace("\r", " ").Replace("\n", " ").Trim();
             var cuerpo = new StringBuilder()

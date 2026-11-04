@@ -820,8 +820,8 @@ WHERE d.IdOc IN @Ids",
         /// <summary>
         /// Estado de aprobación de cada OC (CabOrdenCompra: IdEstado, IdAprobador1-3 y FechaAprobador1-3).
         /// Misma regla que la bandeja de OC: rechazada (IdEstado 6), o nivel alcanzado según los aprobadores registrados.
-        /// El aprobador 1 se toma de EmpleadoCj si la OC es de la web (IdWeb = 1) y de Empleado en otro caso;
-        /// los aprobadores 2 y 3 se registran con el CodEmp de quien aprueba (EmpleadoCj) y se leen siempre de EmpleadoCj.
+        /// Los aprobadores 1, 2 y 3 se toman de EmpleadoCj si la OC es de la web (IdWeb = 1) y de Empleado
+        /// si IdWeb = 0 o NULL.
         /// </summary>
         private async Task<Dictionary<int, Dictionary<string, object?>>> ObtenerAprobacionesOcAsync(
             SqlConnection connection,
@@ -846,12 +846,14 @@ SELECT cab.IdOc AS IdOc,
        cab.IdAprobador1 AS IdAprobador1, cab.IdAprobador2 AS IdAprobador2, cab.IdAprobador3 AS IdAprobador3,
        cab.FechaAprobador1 AS FechaAprobador1, cab.FechaAprobador2 AS FechaAprobador2, cab.FechaAprobador3 AS FechaAprobador3,
        CASE WHEN ISNULL(cab.IdWeb, 0) = 1 THEN a1cj.NombreEmpleado ELSE a1.NombreEmpleado END AS Aprobador1,
-       a2cj.NombreEmpleado AS Aprobador2,
-       a3cj.NombreEmpleado AS Aprobador3
+       CASE WHEN ISNULL(cab.IdWeb, 0) = 1 THEN a2cj.NombreEmpleado ELSE a2.NombreEmpleado END AS Aprobador2,
+       CASE WHEN ISNULL(cab.IdWeb, 0) = 1 THEN a3cj.NombreEmpleado ELSE a3.NombreEmpleado END AS Aprobador3
 FROM dbo.CabOrdenCompra cab
 LEFT JOIN dbo.Empleado a1 ON a1.IdEmpleado = cab.IdAprobador1
 LEFT JOIN dbo.EmpleadoCj a1cj ON a1cj.IdEmpleado = cab.IdAprobador1
+LEFT JOIN dbo.Empleado a2 ON a2.IdEmpleado = cab.IdAprobador2
 LEFT JOIN dbo.EmpleadoCj a2cj ON a2cj.IdEmpleado = cab.IdAprobador2
+LEFT JOIN dbo.Empleado a3 ON a3.IdEmpleado = cab.IdAprobador3
 LEFT JOIN dbo.EmpleadoCj a3cj ON a3cj.IdEmpleado = cab.IdAprobador3
 WHERE cab.IdOc IN @Ids",
                         new { Ids = lote },
