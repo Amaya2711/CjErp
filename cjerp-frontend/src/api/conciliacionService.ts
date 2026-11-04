@@ -16,6 +16,10 @@ import type {
 
 const BASE_URL = "/finanzas/conciliacion";
 
+// El backend ejecuta dos SP con CommandTimeout de 300 s (movimientos + sp_Planilla_Consulta_Estados).
+// El timeout del cliente debe ser mayor para recibir el error del servidor en vez de cortar antes.
+const CONCILIAR_TIMEOUT_MS = 330000;
+
 export async function analizarConciliacionBcp(
   request: ConciliacionBcpAnalizarRequest
 ): Promise<ConciliacionBcpAnalizarResponse> {
@@ -44,7 +48,7 @@ export async function conciliarPlanillaConciliacionBcp(
   request: ConciliacionBcpConciliarPlanillaRequest
 ): Promise<ConciliacionBcpConciliarPlanillaResponse> {
   return await httpClient.post<ConciliacionBcpConciliarPlanillaResponse>(`${BASE_URL}/conciliar-planilla`, request, {
-    timeout: 120000,
+    timeout: CONCILIAR_TIMEOUT_MS,
   });
 }
 
@@ -52,7 +56,7 @@ export async function conciliarPlanillaConciliacionV1(
   request: ConciliacionBcpConciliarPlanillaRequest
 ): Promise<ConciliacionBcpConciliarPlanillaResponse> {
   return await httpClient.post<ConciliacionBcpConciliarPlanillaResponse>(`${BASE_URL}/conciliar-planilla-v1`, request, {
-    timeout: 120000,
+    timeout: CONCILIAR_TIMEOUT_MS,
   });
 }
 

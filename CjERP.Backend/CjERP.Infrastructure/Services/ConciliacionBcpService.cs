@@ -605,13 +605,36 @@ ORDER BY rc.IdAreaFlujo, rc.IdReferencia, rc.IdCuentaContable, rc.Orden, rc.IdRe
         parametrosPlanilla.Add("FechaInicio", rangoFechasBusqueda.FechaInicio, DbType.Date);
         parametrosPlanilla.Add("FechaFin", rangoFechasBusqueda.FechaFin, DbType.Date);
 
-        var planilla = (await connection.QueryAsync(
+        // ModoLiviano omite los totales por OT/Importar/OC/banco de sp_Planilla_Consulta_Estados, que la
+        // conciliacion no usa: toma TotalPagarOriginal (monto crudo) y agrupa por NroOperacion en C#
+        // (BuildScotiabankOperationSummary). Mismas columnas y filas; solo evita el calculo costoso.
+        // Si la BD aun no tiene @ModoLiviano (error 8144), se reintenta con la llamada original.
+        IEnumerable<dynamic> filasPlanilla;
+        try
+        {
+            var parametrosLiviano = new DynamicParameters(parametrosPlanilla);
+            parametrosLiviano.Add("ModoLiviano", true, DbType.Boolean);
+            filasPlanilla = await connection.QueryAsync(
+                _sqlCommandFactory.Create(
+                    StoredProcedurePlanillaEstados,
+                    parametrosLiviano,
+                    CommandType.StoredProcedure,
+                    cancellationToken,
+                    commandTimeout: 300));
+        }
+        catch (SqlException ex) when (ex.Number == 8144)
+        {
+            _logger.LogWarning(ex, "[ConciliacionBcpService] {Sp} no acepta @ModoLiviano; se usa la consulta completa.", StoredProcedurePlanillaEstados);
+            filasPlanilla = await connection.QueryAsync(
                 _sqlCommandFactory.Create(
                     StoredProcedurePlanillaEstados,
                     parametrosPlanilla,
                     CommandType.StoredProcedure,
                     cancellationToken,
-                    commandTimeout: 300)))
+                    commandTimeout: 300));
+        }
+
+        var planilla = filasPlanilla
             .Select(MapDynamicRow)
             .Select(MapPlanillaRow)
             .Select((item, index) =>
@@ -1818,9 +1841,17 @@ ORDER BY rc.IdAreaFlujo, rc.IdReferencia, rc.IdCuentaContable, rc.Orden, rc.IdRe
                 var nroOperacionNormalizado = NormalizeText(movimiento.NroOperacion)?.Trim() ?? string.Empty;
                 var descripcionNumerica = ExtractDigits(movimiento.DescripcionOperacion);
                 var descripcionNoConciliable = IsDescripcionOperacionDescartable(movimiento.DescripcionOperacion);
+                // Bancos con agrupación por operación: BuildConciliacionCandidate solo devuelve candidato
+                // cuando el NroOperacion coincide, así que basta con las filas del diccionario (mismo orden).
+                IReadOnlyList<PlanillaConciliacionRow> filasAEvaluar = !esBancoConAgrupacionPorOperacion
+                    ? planillaRows
+                    : !string.IsNullOrWhiteSpace(nroOperacionNormalizado) &&
+                      planillaRowsByNroOperacion.TryGetValue(nroOperacionNormalizado, out var filasMismoNro)
+                        ? filasMismoNro
+                        : [];
                 var candidates = descripcionNoConciliable
                     ? []
-                    : planillaRows
+                    : filasAEvaluar
                         .Select(planilla => BuildConciliacionCandidate(movimiento, nroOperacionNormalizado, descripcionNumerica, planilla, esBancoConAgrupacionPorOperacion, planillaRows, planillaRowsByNroOperacion, bancoOperationSummaries, requireFechaForTotalPagar))
                         .Where(candidate => candidate is not null)
                         .Select(candidate => candidate!)
@@ -4927,10 +4958,12 @@ Devuelve Ãºnicamente JSON vÃ¡lido con esta estructura:
         DateTime? fechaMovimiento = null,
         bool requiereCoincidenciaFecha = false)
     {
+        // Optimización: antes se recorría TODA la planilla (allPlanillaRows) por cada coincidencia y se
+        // deduplicaba con rows.Any (O(k²)). El diccionario planillaRowsByNroOperacion contiene exactamente
+        // las mismas filas (misma clave, mismo orden), así que el resultado es idéntico.
         var rows = new List<PlanillaConciliacionRow>();
+        var vistos = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var fechaMovimientoNormalizada = fechaMovimiento?.Date;
-        AddRowsFromAllRows(nroOperacionPlanillaNormalizado);
-        AddRowsFromAllRows(nroOperacionMovimientoNormalizado);
         AddRows(nroOperacionPlanillaNormalizado);
 
         if (!string.Equals(nroOperacionMovimientoNormalizado, nroOperacionPlanillaNormalizado, StringComparison.OrdinalIgnoreCase))
@@ -4939,29 +4972,6 @@ Devuelve Ãºnicamente JSON vÃ¡lido con esta estructura:
         }
 
         return rows;
-
-        void AddRowsFromAllRows(string? key)
-        {
-            if (string.IsNullOrWhiteSpace(key))
-            {
-                return;
-            }
-
-            foreach (var row in allPlanillaRows.Where(row => string.Equals(row.NroOperacionNormalizado, key, StringComparison.OrdinalIgnoreCase)))
-            {
-                if (requiereCoincidenciaFecha && (!fechaMovimientoNormalizada.HasValue || !row.FechaDeposito.HasValue || row.FechaDeposito.Value.Date != fechaMovimientoNormalizada.Value))
-                {
-                    continue;
-                }
-
-                if (rows.Any(existing => string.Equals(existing.RowKey, row.RowKey, StringComparison.OrdinalIgnoreCase)))
-                {
-                    continue;
-                }
-
-                rows.Add(row);
-            }
-        }
 
         void AddRows(string? key)
         {
@@ -4977,7 +4987,7 @@ Devuelve Ãºnicamente JSON vÃ¡lido con esta estructura:
                     continue;
                 }
 
-                if (rows.Any(existing => string.Equals(existing.RowKey, row.RowKey, StringComparison.OrdinalIgnoreCase)))
+                if (!vistos.Add(row.RowKey ?? string.Empty))
                 {
                     continue;
                 }
