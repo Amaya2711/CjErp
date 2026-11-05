@@ -3,7 +3,7 @@ import ConfirmDialog from "../../../../../components/base/ConfirmDialog";
 import DataGridPro from "../../../../../components/datagrid/DataGridPro";
 import type { GridColumn } from "../../../../../components/datagrid/types";
 import { FiltroOperativoLookup } from "../../../../../components/lookups/FiltroOperativoLookup";
-import { consultarCampo, grabarCampo, listarCatalogosSolicitud } from "../../../../../api/logisticaEquiposService";
+import { actualizarLineaCampo, consultarCampo, grabarCampo, listarCatalogosSolicitud } from "../../../../../api/logisticaEquiposService";
 import type { FiltroOperativoValue } from "../../../../../models/filtroOperativo";
 import type { CampoLinea, SolicitudCatalogo } from "../../../../../models/logisticaEquipos";
 import { getHttpErrorMessage } from "../../../../../utils/httpError";
@@ -126,6 +126,58 @@ export default function CampoTab() {
     setConfirmar(true);
   };
 
+  /**
+   * Guarda al instante lo editado en una celda (por nro. solicitud + posición + correlativo): observación y serie
+   * se actualizan en la línea; el estado ejecuta el flujo completo de conformidad (stock, kardex, cabecera) y la
+   * línea sale de la bandeja (pasa a 14 x cruzar o 10 observada).
+   */
+  const guardarCelda = async (clave: string, campo: "observacion" | "serie" | "estado", valor: string | number | null) => {
+    const fila = filas.find((f) => f.clave === clave);
+    if (!fila) return;
+    setError("");
+    setMensaje("");
+    const base = { nroSolicitud: fila.nroSolicitud, posicion: fila.posicion, correlativo: fila.correlativo };
+
+    if (campo === "estado") {
+      if (valor === null) return actualizar(clave, { estadoNuevo: null });
+      const idEstado = Number(valor);
+      const observada = idEstado === 10 || fila.cantConforme !== fila.cantSap;
+      if (observada && !fila.obs.trim()) {
+        actualizar(clave, { estadoNuevo: null });
+        return setError(`Solicitud ${fila.nroSolicitud}, posición ${fila.posicion}: indique el detalle en Observación antes de marcarla OBSERVADA.`);
+      }
+      if (!Number.isInteger(fila.cantConforme) || fila.cantConforme < 0 || fila.cantConforme > fila.cantSap) {
+        actualizar(clave, { estadoNuevo: null });
+        return setError(`La cantidad conforme debe ser un entero entre 0 y ${fila.cantSap}.`);
+      }
+      setGuardando(true);
+      try {
+        await actualizarLineaCampo({ ...base, campos: ["estado"], idEstado, cantidad: fila.cantConforme, observacion: fila.obs.trim() || undefined });
+        setFilas((actuales) => actuales.filter((f) => f.clave !== clave));
+        setSeleccion((actuales) => actuales.filter((k) => k !== clave));
+        setMensaje(`Solicitud ${fila.nroSolicitud}, posición ${fila.posicion}: ${idEstado === 10 ? "observada" : "conforme (x cruzar)"}.`);
+      } catch (err) {
+        actualizar(clave, { estadoNuevo: null });
+        setError(getHttpErrorMessage(err, "No se pudo grabar el estado."));
+      } finally {
+        setGuardando(false);
+      }
+      return;
+    }
+
+    const texto = String(valor ?? "");
+    const anterior = campo === "observacion" ? fila.obs : String(fila.serie ?? "");
+    if (texto === anterior) return;
+    const cambio = (v: string): Partial<FilaCampo> => (campo === "observacion" ? { obs: v } : { serie: v });
+    actualizar(clave, cambio(texto));
+    try {
+      await actualizarLineaCampo({ ...base, campos: [campo], [campo]: texto.trim() });
+    } catch (err) {
+      actualizar(clave, cambio(anterior));
+      setError(getHttpErrorMessage(err, `No se pudo guardar ${campo === "serie" ? "la serie" : "la observación"}.`));
+    }
+  };
+
   const ejecutar = async () => {
     setConfirmar(false);
     setGuardando(true);
@@ -163,12 +215,12 @@ export default function CampoTab() {
       { dataField: "codPap", caption: "Código", width: 110 },
       { dataField: "nombreMaterial", caption: "Material", width: 300 },
       { dataField: "unidadMedida", caption: "UM", width: 60 },
-      { dataField: "serie", caption: "Serie", width: 140 },
+      { dataField: "serie", caption: "Serie", width: 140, allowEditing: true },
       { dataField: "pedidoSap", caption: "Pedido SAP", width: 120 },
       { dataField: "nombreCliente", caption: "Cliente", width: 160 },
-      { dataField: "nombreProyecto", caption: "Proyecto", width: 180 },
+      { dataField: "nombreProyecto", caption: "Proyecto", width: 180, groupIndex: 0 },
       { dataField: "idSite", caption: "Site", width: 90 },
-      { dataField: "nombreSite", caption: "Desc. site", width: 200 },
+      { dataField: "nombreSite", caption: "Desc. site", width: 200, groupIndex: 1 },
       { dataField: "tipoTrabajo", caption: "Trabajo", width: 140 },
       { dataField: "nomEstado", caption: "Est. actual", width: 120 },
       { dataField: "fechaCreacion", caption: "Fecha", width: 100, calculateCellValue: (r) => fechaCorta(r.fechaCreacion) },
@@ -264,9 +316,10 @@ export default function CampoTab() {
           editing={{
             allowUpdating: true,
             onCellChanged: ({ key, field, value }) => {
-              if (field === "estadoNuevo") actualizar(String(key), { estadoNuevo: value === "" || value === null ? null : Number(value) });
+              if (field === "estadoNuevo") void guardarCelda(String(key), "estado", value === "" || value === null ? null : Number(value));
               else if (field === "cantConforme") actualizar(String(key), { cantConforme: Number(value) });
-              else if (field === "obs") actualizar(String(key), { obs: String(value ?? "") });
+              else if (field === "obs") void guardarCelda(String(key), "observacion", String(value ?? ""));
+              else if (field === "serie") void guardarCelda(String(key), "serie", String(value ?? ""));
             },
           }}
           rowStyle={(f) => (esObservada(f) && claves.has(f.clave) ? { color: "#B45309", fontWeight: 600 } : undefined)}

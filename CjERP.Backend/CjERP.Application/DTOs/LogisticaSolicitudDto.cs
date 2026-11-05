@@ -276,6 +276,20 @@ public class LogisticaCampoItemDto
     public string? Observacion { get; set; }
 }
 
+/// <summary>Edicion directa de una linea de x Campo. Campos indica que se cambia: observacion, serie, estado.</summary>
+public class LogisticaCampoActualizarDto
+{
+    public string NroSolicitud { get; set; } = string.Empty;
+    public string Posicion { get; set; } = string.Empty;
+    public string? Correlativo { get; set; }
+    public List<string> Campos { get; set; } = new();
+    public string? Observacion { get; set; }
+    public string? Serie { get; set; }
+    /// <summary>14 (conforme / x cruzar) o 10 (observada); ejecuta el flujo completo de sp_Logistica_Campo_Grabar.</summary>
+    public int? IdEstado { get; set; }
+    public decimal? Cantidad { get; set; }
+}
+
 public class LogisticaCampoGrabarDto
 {
     public List<LogisticaCampoItemDto> Items { get; set; } = new();

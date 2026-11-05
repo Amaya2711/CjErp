@@ -214,6 +214,14 @@ public class LogisticaEquiposController : ControllerBase
     public Task<IActionResult> GrabarCampo([FromBody] LogisticaCampoGrabarDto request, CancellationToken cancellationToken = default)
         => Ejecutar(async () => await _service.GrabarCampoAsync(request, ResolveUsuario(), ResolveIdEmpleadoCj(), cancellationToken), "grabar la conformidad de campo");
 
+    [HttpPost("campo/actualizar")]
+    public Task<IActionResult> ActualizarLineaCampo([FromBody] LogisticaCampoActualizarDto request, CancellationToken cancellationToken = default)
+        => Ejecutar(async () =>
+        {
+            await _service.ActualizarLineaCampoAsync(request, ResolveUsuario(), ResolveIdEmpleadoCj(), cancellationToken);
+            return true;
+        }, "actualizar la linea de campo");
+
     /// <summary>Los errores de negocio de los SP llegan como InvalidOperationException y se devuelven como 400 con su mensaje.</summary>
     private async Task<IActionResult> Ejecutar<T>(Func<Task<T>> accion, string descripcion)
     {

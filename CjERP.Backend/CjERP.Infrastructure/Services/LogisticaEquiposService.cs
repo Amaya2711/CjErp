@@ -35,6 +35,7 @@ public class LogisticaEquiposService : ILogisticaEquiposService
     private const string SolicitudCorreoSp = "dbo.sp_Logistica_Solicitud_Correo";
     private const string CampoConsultarSp = "dbo.sp_Logistica_Campo_Consultar";
     private const string CampoGrabarSp = "dbo.sp_Logistica_Campo_Grabar";
+    private const string CampoActualizarSp = "dbo.sp_Logistica_Campo_ActualizarLinea";
 
     private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
 
@@ -531,6 +532,34 @@ public class LogisticaEquiposService : ILogisticaEquiposService
             Procesadas = parametros.Get<int?>("@Procesadas") ?? 0,
             ConDiferencia = parametros.Get<int?>("@ConDiferencia") ?? 0,
         };
+    }
+
+    public async Task ActualizarLineaCampoAsync(
+        LogisticaCampoActualizarDto request,
+        string usuario,
+        int? idEmpleadoCj,
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = _sqlCommandFactory.CreateConnection();
+        await EjecutarAsync(() => connection.ExecuteAsync(
+            _sqlCommandFactory.Create(
+                CampoActualizarSp,
+                new
+                {
+                    NroSolicitud = request.NroSolicitud,
+                    Posicion = request.Posicion,
+                    Correlativo = NullIfWhiteSpace(request.Correlativo),
+                    Campos = string.Join(",", request.Campos),
+                    Observacion = request.Observacion,
+                    Serie = request.Serie,
+                    request.IdEstado,
+                    request.Cantidad,
+                    Usuario = usuario,
+                    IdEmpleadoCj = idEmpleadoCj,
+                },
+                CommandType.StoredProcedure,
+                cancellationToken,
+                commandTimeout: 180)));
     }
 
     /// <summary>Los errores de negocio de los SP (THROW 51xxx) se informan al usuario como InvalidOperationException.</summary>

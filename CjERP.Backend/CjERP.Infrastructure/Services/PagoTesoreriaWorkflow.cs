@@ -29,6 +29,18 @@ public sealed partial class PagoTesoreriaService
             foreach (var banco in bancos) await ConsultarAsync(banco);
         else
             await ConsultarAsync(null);
+
+        // Un responsable puede tener varias cuentas en CuentaEmpleado y el SP vigente puede devolver una fila
+        // por cuenta: se deja una sola por recibo (Correlativo + Fila + Site), la primera devuelta.
+        static string? Campo(IDictionary<string, object> row, string nombre) =>
+            row.FirstOrDefault(item => string.Equals(item.Key, nombre, StringComparison.OrdinalIgnoreCase)).Value?.ToString();
+        var vistos = new HashSet<string>();
+        rows = rows
+            .Where(row => row is not IDictionary<string, object> d
+                || Campo(d, "Correlativo") is null
+                || vistos.Add($"{Campo(d, "Correlativo")}|{Campo(d, "Fila")}|{Campo(d, "IdSite")}"))
+            .ToList();
+
         var ids = rows
             .OfType<IDictionary<string, object>>()
             .Select(row => row.FirstOrDefault(item => string.Equals(item.Key, "Correlativo", StringComparison.OrdinalIgnoreCase) || string.Equals(item.Key, "Corre", StringComparison.OrdinalIgnoreCase)).Value)

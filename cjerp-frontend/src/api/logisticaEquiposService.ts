@@ -151,6 +151,23 @@ export async function consultarCampo(consulta: CampoConsulta) {
   return await httpClient.post<CampoLinea[]>("/logistica/equipos/campo/consultar", consulta);
 }
 
+export type CampoActualizar = {
+  nroSolicitud: string;
+  posicion: string;
+  correlativo?: string | null;
+  /** Que campos se cambian: "observacion" | "serie" | "estado". */
+  campos: Array<"observacion" | "serie" | "estado">;
+  observacion?: string;
+  serie?: string;
+  idEstado?: number | null;
+  cantidad?: number | null;
+};
+
+/** Guarda al instante lo editado en la grilla de x Campo (el estado ejecuta el flujo completo de conformidad). */
+export async function actualizarLineaCampo(item: CampoActualizar) {
+  return await httpClient.post<boolean>("/logistica/equipos/campo/actualizar", item, { timeout: 120000 });
+}
+
 export async function grabarCampo(items: CampoItem[]) {
   return await httpClient.post<CampoGrabarResultado>("/logistica/equipos/campo/grabar", { items }, { timeout: 120000 });
 }

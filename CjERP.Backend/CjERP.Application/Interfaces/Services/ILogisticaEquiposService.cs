@@ -121,6 +121,13 @@ public interface ILogisticaEquiposService
         string usuario,
         int? idEmpleadoCj,
         CancellationToken cancellationToken = default);
+
+    /// <summary>Guarda uno o mas campos editados (observacion, serie, estado) de una linea pendiente de campo.</summary>
+    Task ActualizarLineaCampoAsync(
+        LogisticaCampoActualizarDto request,
+        string usuario,
+        int? idEmpleadoCj,
+        CancellationToken cancellationToken = default);
 }
 
 /// <summary>PDF y correo de la solicitud de equipos (Constante correo_logistica / correo_logistica_impl).</summary>

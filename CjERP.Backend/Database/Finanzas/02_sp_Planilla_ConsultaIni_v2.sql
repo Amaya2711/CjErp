@@ -332,8 +332,16 @@ BEGIN
     FROM Planilla a
 
 
-    LEFT JOIN CuentaEmpleado a4
-        ON a4.IdEmpleado = a.IdResponsable
+    -- Un responsable puede tener varias cuentas (soles/dolares, varios bancos): una sola fila por recibo.
+    -- Prioridad: cuenta que cumple el filtro de banco, luego la guardada en el recibo (Planilla.Cuenta).
+    OUTER APPLY
+    (
+        SELECT TOP (1) ce.Cuenta, ce.CuentaInter, ce.NombreCta, ce.IdBanco
+        FROM CuentaEmpleado ce
+        WHERE ce.IdEmpleado = a.IdResponsable
+          AND (@IdBanco IS NULL OR ce.IdBanco = @IdBanco)
+        ORDER BY CASE WHEN ce.Cuenta = a.Cuenta THEN 0 ELSE 1 END, ce.Cuenta
+    ) a4
 
 
     LEFT JOIN Constante e

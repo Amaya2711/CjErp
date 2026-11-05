@@ -16,6 +16,13 @@ const ESTADO_RECHAZADA = 6;
 /** Fondo rojo suave para las filas rechazadas. */
 const FONDO_RECHAZADA = { background: "#FEE2E2" };
 
+const estiloPopup: Record<string, React.CSSProperties> = {
+  overlay: { position: "fixed", inset: 0, background: "rgba(15, 23, 42, 0.35)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 3100 },
+  // resize: both permite arrastrar la esquina inferior derecha para ampliar o reducir el popup.
+  card: { width: 1100, height: 560, minWidth: 600, minHeight: 320, maxWidth: "calc(100vw - 24px)", maxHeight: "calc(100vh - 24px)", boxSizing: "border-box", display: "flex", flexDirection: "column", overflow: "auto", resize: "both", background: "#FFFFFF", borderRadius: 16, padding: 20, boxShadow: "0 12px 28px rgba(0,0,0,0.16)" },
+  cardAmpliada: { width: "calc(100vw - 24px)", height: "calc(100vh - 24px)", resize: "none" },
+};
+
 const fechaCorta = (valor: unknown) => String(valor ?? "").slice(0, 10);
 
 /** Fecha de hoy menos `dias` días en formato yyyy-MM-dd (hora local). */
@@ -79,6 +86,8 @@ export default function HistorialTab() {
   const [filas, setFilas] = useState<SolicitudHistorial[]>([]);
   const [detalle, setDetalle] = useState<SolicitudDetalle[]>([]);
   const [nroDetalle, setNroDetalle] = useState("");
+  const [cargandoDetalle, setCargandoDetalle] = useState(false);
+  const [ampliado, setAmpliado] = useState(false);
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState("");
   const [consultado, setConsultado] = useState(false);
@@ -142,14 +151,27 @@ export default function HistorialTab() {
     };
   }, []);
 
+  const cerrarDetalle = () => {
+    ultimoDetalle.current = "";
+    setNroDetalle("");
+    setDetalle([]);
+    setAmpliado(false);
+  };
+
   const verDetalle = async (fila: SolicitudHistorial) => {
     ultimoDetalle.current = fila.nroSolicitud;
     setNroDetalle(fila.nroSolicitud);
+    setCargandoDetalle(true);
     try {
       const datos = await listarDetalleSolicitud(fila.nroSolicitud);
       if (ultimoDetalle.current === fila.nroSolicitud) setDetalle(datos);
     } catch (err) {
-      setError(getHttpErrorMessage(err, "No se pudo consultar el detalle."));
+      if (ultimoDetalle.current === fila.nroSolicitud) {
+        cerrarDetalle();
+        setError(getHttpErrorMessage(err, "No se pudo consultar el detalle."));
+      }
+    } finally {
+      if (ultimoDetalle.current === fila.nroSolicitud || ultimoDetalle.current === "") setCargandoDetalle(false);
     }
   };
 
@@ -329,21 +351,36 @@ export default function HistorialTab() {
         />
       </div>
 
-      <strong style={{ fontSize: 13 }}>{nroDetalle ? `Detalle de la solicitud ${nroDetalle}` : "Detalle"}</strong>
-      <div style={{ height: 220, display: "flex", flexDirection: "column" }}>
-        <DataGridPro<SolicitudDetalle>
-          dataSource={detalle}
-          columns={columnasDetalle}
-          rowStyle={(fila) => (fila.idEstado === ESTADO_RECHAZADA ? FONDO_RECHAZADA : undefined)}
-          keyExpr={claveDetalle}
-          height="fill"
-          noDataText="Haga doble clic en una solicitud para ver su detalle."
-          showSearchPanel={false}
-          rowAlternation={false}
-          rowPadding="3px 8px"
-          paging={false}
-        />
-      </div>
+      {nroDetalle ? (
+        <div style={estiloPopup.overlay} role="dialog" aria-modal="true" aria-label={`Detalle de la solicitud ${nroDetalle}`} onClick={cerrarDetalle}>
+          <div style={{ ...estiloPopup.card, ...(ampliado ? estiloPopup.cardAmpliada : null) }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+              <h3 style={{ margin: 0, color: "#17143A" }}>Detalle de la solicitud {nroDetalle}</h3>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button type="button" style={styles.secondary} onClick={() => setAmpliado((v) => !v)} title="También puede arrastrar la esquina inferior derecha para cambiar el tamaño.">
+                  {ampliado ? "Restaurar" : "Ampliar"}
+                </button>
+                <button type="button" style={styles.secondary} onClick={cerrarDetalle}>Cerrar</button>
+              </div>
+            </div>
+            <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
+              <DataGridPro<SolicitudDetalle>
+                dataSource={detalle}
+                columns={columnasDetalle}
+                rowStyle={(fila) => (fila.idEstado === ESTADO_RECHAZADA ? FONDO_RECHAZADA : undefined)}
+                keyExpr={claveDetalle}
+                height="fill"
+                loading={cargandoDetalle}
+                noDataText="La solicitud no tiene detalle."
+                showSearchPanel={false}
+                rowAlternation={false}
+                rowPadding="3px 8px"
+                paging={false}
+              />
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       <MotivoRechazoDialog
         open={posicionRechazo !== null}
