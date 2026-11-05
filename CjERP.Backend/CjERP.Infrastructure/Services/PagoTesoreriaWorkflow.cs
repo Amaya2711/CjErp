@@ -31,15 +31,48 @@ public sealed partial class PagoTesoreriaService
             await ConsultarAsync(null);
 
         // Un responsable puede tener varias cuentas en CuentaEmpleado y el SP vigente puede devolver una fila
-        // por cuenta: se deja una sola por recibo (Correlativo + Fila + Site), la primera devuelta.
+        // por cuenta: se deja una sola por recibo (Correlativo + Fila + Site). Se prefiere la fila cuya cuenta
+        // coincide con la guardada en el recibo (Planilla.Cuenta); si ninguna coincide, la primera devuelta.
         static string? Campo(IDictionary<string, object> row, string nombre) =>
             row.FirstOrDefault(item => string.Equals(item.Key, nombre, StringComparison.OrdinalIgnoreCase)).Value?.ToString();
-        var vistos = new HashSet<string>();
-        rows = rows
-            .Where(row => row is not IDictionary<string, object> d
-                || Campo(d, "Correlativo") is null
-                || vistos.Add($"{Campo(d, "Correlativo")}|{Campo(d, "Fila")}|{Campo(d, "IdSite")}"))
-            .ToList();
+        static string SoloDigitos(string? valor) => new((valor ?? "").Where(char.IsLetterOrDigit).ToArray());
+        var correlativosConsulta = rows
+            .OfType<IDictionary<string, object>>()
+            .Select(d => Campo(d, "Correlativo"))
+            .Where(v => int.TryParse(v, out _))
+            .Select(v => int.Parse(v!))
+            .Distinct()
+            .ToArray();
+        var cuentasRecibo = new Dictionary<int, string>();
+        foreach (var lote in correlativosConsulta.Chunk(1000))
+        {
+            var cuentas = await cn.QueryAsync<(int Correlativo, string? Cuenta)>(new CommandDefinition(
+                "SELECT Correlativo, Cuenta FROM Planilla WHERE Correlativo IN @ids", new { ids = lote }, cancellationToken: ct));
+            foreach (var item in cuentas) cuentasRecibo[item.Correlativo] = SoloDigitos(item.Cuenta);
+        }
+        bool CoincideCuenta(IDictionary<string, object> d) =>
+            int.TryParse(Campo(d, "Correlativo"), out var corre)
+            && cuentasRecibo.TryGetValue(corre, out var guardada)
+            && guardada.Length > 0
+            && SoloDigitos(Campo(d, "Cuenta")) == guardada;
+        var elegidos = new Dictionary<string, dynamic>();
+        var resultado2 = new List<dynamic>();
+        foreach (var row in rows)
+        {
+            if (row is not IDictionary<string, object> d || Campo(d, "Correlativo") is null) { resultado2.Add(row); continue; }
+            var clave = $"{Campo(d, "Correlativo")}|{Campo(d, "Fila")}|{Campo(d, "IdSite")}";
+            if (!elegidos.TryGetValue(clave, out var previa))
+            {
+                elegidos[clave] = row;
+                resultado2.Add(row);
+            }
+            else if (!CoincideCuenta((IDictionary<string, object>)previa) && CoincideCuenta(d))
+            {
+                resultado2[resultado2.IndexOf(previa)] = row;
+                elegidos[clave] = row;
+            }
+        }
+        rows = resultado2;
 
         var ids = rows
             .OfType<IDictionary<string, object>>()
