@@ -1050,15 +1050,22 @@ function elegirCuentaResponsable(
   const delResponsable = empleados.filter((empleado) => String(empleado.idEmpleado) === String(responsable));
   if (delResponsable.length === 0) return undefined;
 
+  // IdBancoCta identifica al BANCO (no a la cuenta): un responsable con cuentas en soles y dólares del mismo banco
+  // comparte el mismo IdBancoCta. Por eso primero se ubica por número de cuenta (exacto) y el banco solo desempata.
+  const cuentaGasto = normalizarNroCuenta(cuentaNumero);
+  if (cuentaGasto) {
+    const porCuenta = delResponsable.filter((empleado) => normalizarNroCuenta(empleado.cuenta) === cuentaGasto);
+    if (porCuenta.length > 0) {
+      const porCuentaYBanco = idBancoCta
+        ? porCuenta.find((empleado) => getIdBancoCtaValue(empleado) === String(idBancoCta))
+        : undefined;
+      return porCuentaYBanco ?? porCuenta[0];
+    }
+  }
+
   if (idBancoCta) {
     const porId = delResponsable.find((empleado) => getIdBancoCtaValue(empleado) === String(idBancoCta));
     if (porId) return porId;
-  }
-
-  const cuentaGasto = normalizarNroCuenta(cuentaNumero);
-  if (cuentaGasto) {
-    const porCuenta = delResponsable.find((empleado) => normalizarNroCuenta(empleado.cuenta) === cuentaGasto);
-    if (porCuenta) return porCuenta;
   }
 
   return delResponsable[0];

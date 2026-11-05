@@ -131,6 +131,7 @@ BEGIN
         a.IdComprobante, a.IdTipoPago, a.IdRendicion, a.HoraCreacion, a.Responsable, a.IdTipoDoc, a.Fila,
         a.IdTransferencia, a.Tipo_Trabajo, a.IdOc, a.MontoRetencion, a.TotalPagar, a.IdTarea, a.imgFactura,
         a.idprovisional, a.serie, a.NroOperacion, a.Observacion, a.IdBanco, a.FechaReaprobador,
+        a.Cuenta AS CuentaPlanilla,
         -- OT del recibo normalizada; sin OT (vacia, 0 o NULL) los totales se toman del sitio.
         CASE WHEN UPPER(LTRIM(RTRIM(ISNULL(CONVERT(VARCHAR(50), a.OT), '')))) IN ('', '0', 'NULL') THEN '' ELSE LTRIM(RTRIM(CONVERT(VARCHAR(50), a.OT))) END AS OtNorm,
         CASE WHEN UPPER(LTRIM(RTRIM(ISNULL(CONVERT(VARCHAR(50), a.OT), '')))) IN ('', '0', 'NULL') THEN 0 ELSE 1 END AS OtValida
@@ -362,8 +363,13 @@ BEGIN
         a.CorreSite AS h_CorreSite
     INTO #R
     FROM #B a
-    LEFT JOIN CuentaEmpleado a4
-        ON a4.IdEmpleado = a.IdResponsable
+    -- Una sola cuenta por recibo (el responsable puede tener varias): prioriza Planilla.Cuenta.
+    OUTER APPLY (
+        SELECT TOP (1) ce.cuenta, ce.cuentainter
+        FROM CuentaEmpleado ce
+        WHERE ce.IdEmpleado = a.IdResponsable
+        ORDER BY CASE WHEN ce.cuenta = a.CuentaPlanilla THEN 0 ELSE 1 END, ce.cuenta
+    ) a4
     LEFT JOIN Constante e
         ON e.Sociedad = 'PE01'
        AND e.Programa = 'PLANTILLA'
