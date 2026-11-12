@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import AppPage from "../../components/base/AppPage";
 import GastosExcelJobPanel from "./GastosExcelJobPanel";
+import EmpleadosListaJobPanel from "./EmpleadosListaJobPanel";
 import {
   asistenciaSharePointService,
   type AsistenciaSharePointConfig,
@@ -159,11 +160,12 @@ function AsistenciaSharePointJobPanel() {
   );
 }
 
-type JobTabKey = "asistencia-sharepoint" | "gastos-excel-sharepoint";
+type JobTabKey = "asistencia-sharepoint" | "gastos-excel-sharepoint" | "empleado-excel-sharepoint";
 
 const JOB_TABS: Array<{ key: JobTabKey; label: string }> = [
   { key: "asistencia-sharepoint", label: "Exportación asistencia SharePoint" },
   { key: "gastos-excel-sharepoint", label: "Gastos Excel SharePoint" },
+  { key: "empleado-excel-sharepoint", label: "Empleado Excel sharepoint" },
 ];
 
 export default function ExportacionAsistenciaSharePointPage() {
@@ -188,6 +190,7 @@ export default function ExportacionAsistenciaSharePointPage() {
 
       {tab === "asistencia-sharepoint" ? <AsistenciaSharePointJobPanel /> : null}
       {tab === "gastos-excel-sharepoint" ? <GastosExcelJobPanel /> : null}
+      {tab === "empleado-excel-sharepoint" ? <EmpleadosListaJobPanel /> : null}
     </AppPage>
   );
 }

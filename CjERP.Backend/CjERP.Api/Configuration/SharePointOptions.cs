@@ -16,6 +16,41 @@ public sealed class SharePointOptions
     public Dictionary<string, string> FolderPaths { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public SharePointAsistenciaOptions Asistencia { get; set; } = new();
     public SharePointGastosExcelOptions GastosExcel { get; set; } = new();
+    public SharePointEmpleadosListaOptions EmpleadosLista { get; set; } = new();
+}
+
+/// <summary>Lista de SharePoint (M_EMPLEADOS) que sincroniza el job EMPLEADOS_LISTA_SHAREPOINT.</summary>
+public sealed class SharePointEmpleadosListaOptions
+{
+    /// <summary>Sitio de la lista (distinto del sitio de aplicativos): https://cjtelecom.sharepoint.com/sites/CJ-TELECOM.</summary>
+    public string SitePath { get; set; } = "/sites/CJ-TELECOM";
+    public string ListName { get; set; } = "M_EMPLEADOS";
+    /// <summary>
+    /// Columna del resultado de sp_Consultar_EmpleadoSharepoint que identifica de forma única a cada empleado
+    /// (debe existir con el mismo nombre interno en la lista). Vacío = primera columna del SP. PV: confirmar.
+    /// </summary>
+    public string KeyColumn { get; set; } = "IdEmpleado";
+
+    /// <summary>Columna del SP usada para emparejar registros de la lista que aún no tienen la clave principal (vacío = no usar).</summary>
+    public string SecondaryKeyColumn { get; set; } = "NroDocumento";
+
+    /// <summary>
+    /// Homologación columna del SP → columna de la lista (nombre interno o para mostrar). Solo se sincronizan las
+    /// columnas mapeadas. La clave (KeyColumn) debe estar en este mapa.
+    /// </summary>
+    public Dictionary<string, string> ColumnMap { get; set; } = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["NombreEmpleado"] = "EMPLEADO",
+        ["IdEmpleado"] = "CODIGO_EMPLEADO",
+        ["TipoDocumento"] = "TIPO_DOC_IDENTIDAD",
+        ["NroDocumento"] = "DOC_IDENTIDAD",
+        ["Sexo"] = "SEXO",
+        ["Telefono"] = "CELULAR",
+        ["Correo"] = "CORREO",
+        ["FechaIngreso"] = "FECHA_INGRESO",
+        ["Estado"] = "ESTADO",
+        ["fecnacimiento"] = "fecha_nacimiento"
+    };
 }
 
 public sealed class SharePointAsistenciaOptions

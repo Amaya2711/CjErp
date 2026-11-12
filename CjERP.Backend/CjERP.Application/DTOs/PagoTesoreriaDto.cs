@@ -36,12 +36,12 @@ public sealed class PagoTesoreriaRequestDto
     [StringLength(50)] public string Cheque { get; set; } = "";
     [StringLength(50)] public string NroOperacion { get; set; } = "";
     [StringLength(500)] public string Comentario { get; set; } = "";
-    [Required, MinLength(1), MaxLength(500)] public List<PagoTesoreriaItemDto> Items { get; set; } = [];
+    [Required, MinLength(1), MaxLength(1000)] public List<PagoTesoreriaItemDto> Items { get; set; } = [];
 }
 
 public sealed class PagoTesoreriaGrabarDto
 {
-    [Required, MinLength(1), MaxLength(500)] public List<PagoTesoreriaItemDto> Items { get; set; } = [];
+    [Required, MinLength(1), MaxLength(1000)] public List<PagoTesoreriaItemDto> Items { get; set; } = [];
     public int IdEjecutor { get; set; }
     public int IdTransferencia { get; set; }
     public int IdBanco { get; set; }

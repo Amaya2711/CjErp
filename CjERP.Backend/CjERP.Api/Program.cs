@@ -300,6 +300,9 @@ builder.Services.AddScoped<IAsistenciaSharePointJobScheduler, AsistenciaSharePoi
 builder.Services.AddScoped<IGastosExcelSharePointRepository, GastosExcelSharePointRepository>();
 builder.Services.AddScoped<IGastosExcelSharePointService, GastosExcelSharePointService>();
 builder.Services.AddScoped<IGastosExcelSharePointJobScheduler, GastosExcelSharePointJobScheduler>();
+builder.Services.AddScoped<IEmpleadosListaSharePointRepository, EmpleadosListaSharePointRepository>();
+builder.Services.AddScoped<IEmpleadosListaSharePointService, EmpleadosListaSharePointService>();
+builder.Services.AddScoped<IEmpleadosListaSharePointJobScheduler, EmpleadosListaSharePointJobScheduler>();
 builder.Services.AddScoped<IWhatsappInboundService, WhatsappInboundService>();
 builder.Services.AddScoped<IArrendamientosService, ArrendamientosService>();
 builder.Services.AddHttpClient<IMetaWhatsAppService, MetaWhatsAppService>(client =>
@@ -362,6 +365,7 @@ builder.Services.AddSingleton(builder.Configuration.GetSection("IaChat:ScopeEnfo
     ?? new IaScopeEnforcementOptions());
 builder.Services.AddHttpClient<ISharePointCommercialUploadService, SharePointCommercialUploadService>();
 builder.Services.AddHttpClient<ISharePointExcelTableService, SharePointCommercialUploadService>();
+builder.Services.AddHttpClient<ISharePointListSyncService, SharePointListSyncService>();
 builder.Services.AddHttpClient<IWupAuthService, WupAuthService>((serviceProvider, client) =>
 {
     var settings = serviceProvider.GetRequiredService<Microsoft.Extensions.Options.IOptions<WupSettings>>().Value;
@@ -542,6 +546,15 @@ app.Lifetime.ApplicationStarted.Register(() => _ = Task.Run(async () =>
     catch (Exception ex)
     {
         app.Logger.LogWarning(ex, "No se pudo programar el job de gastos Excel (GASTOS_EXCEL_SHAREPOINT).");
+    }
+    try
+    {
+        // Nace inactivo: solo se programa si un administrador lo activo desde la pestaña "Empleado Excel sharepoint".
+        await scope.ServiceProvider.GetRequiredService<IEmpleadosListaSharePointJobScheduler>().ReprogramarAsync();
+    }
+    catch (Exception ex)
+    {
+        app.Logger.LogWarning(ex, "No se pudo programar el job de empleados (EMPLEADOS_LISTA_SHAREPOINT).");
     }
     try
     {

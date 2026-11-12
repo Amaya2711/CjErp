@@ -204,10 +204,10 @@ export default function CampoTab() {
   const actualizar = (clave: string, cambios: Partial<FilaCampo>) =>
     setFilas((actuales) => actuales.map((f) => (f.clave === clave ? { ...f, ...cambios } : f)));
 
-  const columnas = useMemo<GridColumn<FilaCampo>[]>(
+  const columnasBase = useMemo<GridColumn<FilaCampo>[]>(
     () => [
       { dataField: "estadoNuevo", caption: "Estado", width: 160, fixed: true, allowEditing: true, lookup: ESTADOS, cellStyle: (v) => (v ? { fontWeight: 700, color: "#1F6F8B" } : { color: "#94A3B8" }) },
-      { dataField: "cantConforme", caption: "Cant. conforme", dataType: "number", width: 110, fixed: true, allowEditing: true },
+      { dataField: "cantConforme", caption: "Cant. conforme", dataType: "number", width: 110, fixed: true, allowEditing: false },
       { dataField: "cantSap", caption: "Cant. enviada", dataType: "number", width: 100 },
       { dataField: "obs", caption: "Observación", width: 240, allowEditing: true },
       { dataField: "nroSolicitud", caption: "Nro. solicitud", width: 110 },
@@ -226,6 +226,13 @@ export default function CampoTab() {
       { dataField: "fechaCreacion", caption: "Fecha", width: 100, calculateCellValue: (r) => fechaCorta(r.fechaCreacion) },
     ],
     [],
+  );
+
+  // DataGridPro deja editable toda columna sin allowEditing:false: aquí solo se editan Observación y Serie
+  // (Estado queda bloqueado hasta definir su condición).
+  const columnas = useMemo<GridColumn<FilaCampo>[]>(
+    () => columnasBase.map((c) => ({ ...c, allowEditing: c.dataField === "obs" || c.dataField === "serie" })),
+    [columnasBase],
   );
 
   return (
@@ -315,6 +322,7 @@ export default function CampoTab() {
           }}
           editing={{
             allowUpdating: true,
+            editOnClick: true,
             onCellChanged: ({ key, field, value }) => {
               if (field === "estadoNuevo") void guardarCelda(String(key), "estado", value === "" || value === null ? null : Number(value));
               else if (field === "cantConforme") actualizar(String(key), { cantConforme: Number(value) });

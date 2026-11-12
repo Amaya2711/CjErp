@@ -1627,6 +1627,10 @@ export default function PagosV2Page() {
 
   const canUseTab = useCallback(
     (tab: PagoEstado) => {
+      // Observadas está activa para todos los usuarios, sin depender de SegPermisoAccion.
+      if (tab === "observadas") {
+        return true;
+      }
       const actionKey = TAB_ACTION_KEYS[tab];
       // Compatibilidad con registros históricos cuya clave se guardó sin punto
       // (p. ej. "tabhormiga" en lugar de "tab.hormiga").
@@ -1699,13 +1703,23 @@ export default function PagosV2Page() {
       try {
         for (let inicio = 0; inicio < correlativos.length; inicio += TOTALES_DIFERIDOS_LOTE) {
           const lote = correlativos.slice(inicio, inicio + TOTALES_DIFERIDOS_LOTE);
-          const response = await consultarPlanillaEstados(
-            buildPagosV1PlanillaRequest(
-              [{ nombre: "Correlativos", valor: lote.join(","), tipo: "string" }, ...tiposCambio],
-              "pagos-v2-totales",
-            ),
-            { timeoutMs: 120000, signal },
+          const requestTotales = buildPagosV1PlanillaRequest(
+            [{ nombre: "Correlativos", valor: lote.join(","), tipo: "string" }, ...tiposCambio],
+            "pagos-v2-totales",
           );
+          let response: Awaited<ReturnType<typeof consultarPlanillaEstados>> | undefined;
+          // Un deadlock de SQL Server (error 1205) es transitorio: el SP se vuelve a ejecutar hasta 3 veces.
+          for (let intento = 1; ; intento += 1) {
+            try {
+              response = await consultarPlanillaEstados(requestTotales, { timeoutMs: 120000, signal });
+              break;
+            } catch (error) {
+              const esDeadlock = /deadlock/i.test(getHttpErrorMessage(error, ""));
+              if (!esDeadlock || intento >= 3 || signal.aborted) throw error;
+              pushLoadTrace(`Totales diferidos: deadlock, reintento ${intento}`);
+              await new Promise((resolve) => setTimeout(resolve, 800 * intento));
+            }
+          }
           if (signal.aborted) return;
 
           for (const item of Array.isArray(response?.rows) ? response.rows : []) {
@@ -1726,7 +1740,10 @@ export default function PagosV2Page() {
         tabRowsCacheRef.current.set(cacheKey, aplicarTotalesDiferidos(filas, totales));
       } catch (error) {
         if (!signal.aborted) {
-          pushLoadTrace(`Totales diferidos no disponibles: ${getHttpErrorMessage(error, "error")}`);
+          const detalleError = getHttpErrorMessage(error, "error");
+          pushLoadTrace(`Totales diferidos no disponibles: ${detalleError}`);
+          // Sin totales, "% OC", "Total Gastado" y similares quedan incompletos: se avisa en pantalla.
+          setMessage(`No se pudieron cargar los totales (% OC, total gastado). Pulse Actualizar. Detalle: ${detalleError}`);
         }
       } finally {
         if (!signal.aborted) {

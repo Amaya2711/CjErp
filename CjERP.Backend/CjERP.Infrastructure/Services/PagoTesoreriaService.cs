@@ -151,8 +151,8 @@ public sealed partial class PagoTesoreriaService(ISqlCommandFactory factory)
     public async Task<int> PagarAsync(PagoTesoreriaRequestDto request, string usuario, CancellationToken ct)
     {
         if (request.EstadoOrigen is not (5 or 8)) throw new ArgumentException("Solo se pueden pagar recibos administrativos o programados.");
-        if (request.Items.Count is < 1 or > 500 || request.Items.Select(x => x.Correlativo).Distinct().Count() != request.Items.Count)
-            throw new ArgumentException("Seleccione entre 1 y 500 recibos sin duplicados.");
+        if (request.Items.Count is < 1 or > 1000 || request.Items.Select(x => x.Correlativo).Distinct().Count() != request.Items.Count)
+            throw new ArgumentException("Seleccione entre 1 y 1000 recibos sin duplicados.");
         if (request.FechaDeposito == default || request.FechaDeposito.Date > DateTime.UtcNow.AddHours(-5).Date)
             throw new ArgumentException("Indique una fecha de depósito válida, no futura.");
         await using var cn = factory.CreateConnection();

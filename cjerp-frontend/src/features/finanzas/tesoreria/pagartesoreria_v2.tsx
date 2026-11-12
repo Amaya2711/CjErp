@@ -887,8 +887,8 @@ export default function PagarTesoreriaV2Page() {
       );
       return;
     }
-    if (!selectedRows.length || selectedRows.length > 500) {
-      setError("Seleccione entre 1 y 500 recibos para registrar el lote.");
+    if (!selectedRows.length || selectedRows.length > 1000) {
+      setError("Seleccione entre 1 y 1000 recibos para registrar el lote.");
       return;
     }
     if (
@@ -1927,7 +1927,7 @@ export default function PagarTesoreriaV2Page() {
                   {estado === 5 && (
                     <button className="pt-primary" type="submit" form={`pt-stage-${estado}`}
                       value="programar"
-                      disabled={saving || loading || !puedePagar || !selectedRows.length || selectedRows.length > 500}
+                      disabled={saving || loading || !puedePagar || !selectedRows.length || selectedRows.length > 1000}
                       title="Enviar a Programado">
                       Enviar a Programado
                     </button>
@@ -1935,7 +1935,7 @@ export default function PagarTesoreriaV2Page() {
                 </>
               )}
               <PagoEtapaActions estado={estado} formId={`pt-stage-${estado}`}
-                disabled={saving || loading || !puedePagar || selectedRows.length > 500}
+                disabled={saving || loading || !puedePagar || selectedRows.length > 1000}
                  // En Administrativo la acción se ejecuta desde Registrar pago.
                  programarDisabled={estado === 5}
                  ocultarProgramar={estado === 5}

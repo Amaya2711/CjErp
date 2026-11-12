@@ -63,7 +63,11 @@ BEGIN
          cl.NombreCliente,
          a.FechaCreacion
   FROM dbo.DetSolicitud b
-  INNER JOIN dbo.CabSolicitud a ON a.NroSolicitud = b.NroSolicitud
+  -- CabSolicitud puede tener 2+ filas por solicitud (destino IdMovimiento = 1 y origen = 2): una sola por linea, preferiendo el destino.
+  OUTER APPLY (SELECT TOP (1) c.FechaCreacion
+               FROM dbo.CabSolicitud c
+               WHERE c.NroSolicitud = b.NroSolicitud
+               ORDER BY CASE WHEN c.IdMovimiento = 1 THEN 0 ELSE 1 END) a
   LEFT JOIN dbo.Material m      ON CAST(m.CodPap AS nvarchar(50)) = CAST(b.CodPap AS nvarchar(50))
   LEFT JOIN dbo.Constante e     ON e.Campo = 'ESTADO_LOG' AND e.Correlativo = b.IdEstado
   LEFT JOIN dbo.Site s          ON s.IdSite = b.IdSite AND s.Correlativo = b.CorreSite
