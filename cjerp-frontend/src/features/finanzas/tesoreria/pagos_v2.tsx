@@ -3557,6 +3557,9 @@ export default function PagosV2Page() {
       }
     }
 
+    // El SP (script Finanzas/15) admite primera aprobación desde estados 0, 2 y 7.
+    const filasAProcesar = selectedRows;
+
     try {
       // Envío en bloques de 40: cada bloque es una transacción corta en el SP (sin bloqueos largos sobre Planilla).
       const resultado = await aprobarPlanillaMasivaPorBloques(
@@ -3564,7 +3567,7 @@ export default function PagosV2Page() {
           codEstado,
           observacion: null,
           idRegularizar: Math.trunc(idRegularizar),
-          registros: selectedRows.map((row) => ({
+          registros: filasAProcesar.map((row) => ({
             correlativo: Math.trunc(Number(row.correlativo)),
             idSite: row.siteId,
             tipoMoneda: Math.trunc(Number(row.tipoMoneda ?? 0)),
@@ -3585,7 +3588,7 @@ export default function PagosV2Page() {
       }
 
       const mensajes: string[] = [];
-      mensajes.push(`${resumen.procesados} de ${selectedRows.length} registro(s) procesado(s).`);
+      mensajes.push(`${resumen.procesados} de ${filasAProcesar.length} registro(s) procesado(s).`);
 
       if (resumen.enviadosSegundaAprobacion > 0) {
         mensajes.push(`${resumen.enviadosSegundaAprobacion} registro(s) fueron enviados a segunda aprobación.`);
@@ -4303,6 +4306,12 @@ export default function PagosV2Page() {
     {
       dataField: "pctFicticio",
       caption: "% Ficticio",
+      headerTooltip:
+        "% Ficticio = Sub Ficticio ÷ Total Visible × 100\n" +
+        "• Sub Ficticio = total ya pagado de la OT/sitio + subtotal de este recibo.\n" +
+        "• Total Visible = monto de la OT/sitio en Importar.\n" +
+        "• Una sola moneda: se calcula en esa moneda. Monedas mezcladas: todo en S/ con los tipos de cambio de la pantalla.\n" +
+        "• Si Total Visible es 0, el resultado es 0 %.",
       dataType: "number",
       width: 100,
       visible: showTotalSitio,

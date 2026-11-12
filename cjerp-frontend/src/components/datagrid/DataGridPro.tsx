@@ -846,7 +846,15 @@ export default function DataGridPro<T extends object>({
                       cursor: sortable ? "pointer" : "default",
                       ...(dropTarget === c.dataField ? { boxShadow: "inset 3px 0 0 #2563EB" } : null),
                     }}
-                    title={sortable ? "Clic: ordenar · Mayús/Ctrl+clic: orden múltiple" : undefined}
+                    title={
+                      c.headerTooltip
+                        ? sortable
+                          ? `${c.headerTooltip}\n\nClic: ordenar · Mayús/Ctrl+clic: orden múltiple`
+                          : c.headerTooltip
+                        : sortable
+                          ? "Clic: ordenar · Mayús/Ctrl+clic: orden múltiple"
+                          : undefined
+                    }
                   >
                     <span style={styles.headerContent}>
                       {draggable ? <GripVertical size={12} color="#94A3B8" /> : null}

@@ -16,6 +16,8 @@ export type GridLookupItem = { value: unknown; label: string };
 export type GridColumn<T extends object = Record<string, unknown>> = {
   dataField: string;
   caption?: string;
+  /** Texto del tooltip al pasar el cursor sobre la cabecera (p. ej. fórmula de la columna). */
+  headerTooltip?: string;
   dataType?: GridDataType;
   width?: number;
   minWidth?: number;
