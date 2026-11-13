@@ -59,6 +59,8 @@ export type OrdenCompraDetalleDto = {
   fila?: number | null;
   correlativo?: number | null;
   estado?: string;
+  /** DetOrdenCompra.IdEstado de la posición (6 = rechazada). */
+  idEstadoDetalle?: number | null;
   gestor?: string;
   rutaImagen?: string;
   imgOc?: string;
@@ -347,6 +349,23 @@ export async function actualizarOrdenCompra(payload: OrdenCompraActualizarPayloa
 /** Elimina una posición (fila de DetOrdenCompra) de la orden de compra y recalcula sus totales. */
 export async function eliminarDetalleOrdenCompra(idOc: number, fila: number) {
   return await httpClient.delete<OrdenCompraEliminarDetalleResultDto>(`/facturacionfinanciera/oc/${idOc}/detalle/${fila}`);
+}
+
+export type OrdenCompraRechazarDetalleResultDto = {
+  idOc: number;
+  filasRechazadas: number[];
+  ocRechazada: boolean;
+  subtotal: number;
+  igv: number;
+  total: number;
+};
+
+/** Rechaza (sin eliminar) posiciones de la OC: quedan visibles con estado Rechazada. Todo o nada. */
+export async function rechazarDetalleOrdenCompra(idOc: number, filas: number[], observacion: string) {
+  return await httpClient.post<OrdenCompraRechazarDetalleResultDto>(
+    `/facturacionfinanciera/oc/${idOc}/detalle/rechazar`,
+    { filas, observacion },
+  );
 }
 
 export type OrdenCompraEliminarDetalleResultDto = {

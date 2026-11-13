@@ -426,6 +426,7 @@ public class OrdenCompraService : IOrdenCompraService
                 ) AS Igv
             FROM dbo.DetOrdenCompra det
             WHERE det.IdOc = cab.IdOc
+              AND ISNULL(det.IdEstado, 0) <> 6
         ) x
         WHERE cab.IdOc = @IdOc;
 
@@ -763,13 +764,132 @@ public class OrdenCompraService : IOrdenCompraService
         CancellationToken cancellationToken = default)
     {
         await using var connection = _sqlCommandFactory.CreateConnection();
-        return await connection.QueryAsync<OrdenCompraDetalleDto>(
+        var detalle = (await connection.QueryAsync<OrdenCompraDetalleDto>(
             _sqlCommandFactory.Create(
                 BuscarDetalleSp,
                 BuildConsultaParameters(request),
                 CommandType.StoredProcedure,
                 cancellationToken,
-                commandTimeout: 120));
+                commandTimeout: 120))).ToList();
+
+        // El SP no devuelve DetOrdenCompra.IdEstado: se completa para poder marcar las posiciones rechazadas (6).
+        var idsOc = detalle.Select(item => item.IdOc).Where(id => id > 0).Distinct().ToArray();
+        if (idsOc.Length > 0)
+        {
+            try
+            {
+                var estados = await connection.QueryAsync<(int IdOc, int? Fila, int? IdEstado)>(
+                    new CommandDefinition(
+                        "SELECT IdOc, Fila, IdEstado FROM dbo.DetOrdenCompra WHERE IdOc IN @IdsOc;",
+                        new { IdsOc = idsOc },
+                        cancellationToken: cancellationToken,
+                        commandTimeout: 60));
+                var porClave = estados
+                    .Where(e => e.Fila.HasValue)
+                    .GroupBy(e => (e.IdOc, e.Fila!.Value))
+                    .ToDictionary(g => g.Key, g => g.First().IdEstado);
+                foreach (var item in detalle.Where(i => i.Fila.HasValue))
+                {
+                    if (porClave.TryGetValue((item.IdOc, item.Fila!.Value), out var idEstado))
+                    {
+                        item.IdEstadoDetalle = idEstado;
+                    }
+                }
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                _logger.LogWarning(exception, "No se pudo completar el estado de las posiciones de la OC.");
+            }
+        }
+
+        return detalle;
+    }
+
+    public async Task<OrdenCompraRechazarDetalleResultDto> RechazarDetalleAsync(
+        int idOc,
+        IReadOnlyCollection<int> filas,
+        CancellationToken cancellationToken = default)
+    {
+        var filasUnicas = filas.Where(f => f >= 0).Distinct().ToArray();
+        if (idOc <= 0 || filasUnicas.Length == 0)
+        {
+            throw new InvalidOperationException("Seleccione al menos una posición para rechazar.");
+        }
+
+        await using var connection = _sqlCommandFactory.CreateConnection();
+        await connection.OpenAsync(cancellationToken);
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+
+        try
+        {
+            foreach (var fila in filasUnicas)
+            {
+                var idEstado = await connection.QuerySingleOrDefaultAsync<int?>(new CommandDefinition(
+                    "SELECT TOP 1 ISNULL(IdEstado, 0) FROM dbo.DetOrdenCompra WHERE IdOc = @IdOc AND Fila = @Fila;",
+                    new { IdOc = idOc, Fila = fila }, transaction, cancellationToken: cancellationToken));
+                if (idEstado is null)
+                {
+                    throw new InvalidOperationException($"No se encontró la posición {fila} de la orden de compra {idOc}.");
+                }
+
+                if (idEstado == 6)
+                {
+                    throw new InvalidOperationException($"La posición {fila} ya está rechazada.");
+                }
+
+                // Mismo criterio que el rechazo de la OC completa: los recibos rechazados (Estado 3) no bloquean.
+                var conRecibos = await connection.ExecuteScalarAsync<int>(new CommandDefinition(
+                    """
+                    SELECT CASE WHEN EXISTS (
+                        SELECT 1 FROM dbo.Planilla
+                        WHERE TRY_CONVERT(INT, IdOc) = @IdOc AND Fila = @Fila
+                          AND ISNULL(TRY_CONVERT(int, Estado), -1) <> 3
+                    ) THEN 1 ELSE 0 END;
+                    """,
+                    new { IdOc = idOc, Fila = fila }, transaction, cancellationToken: cancellationToken));
+                if (conRecibos != 0)
+                {
+                    throw new InvalidOperationException($"No se puede rechazar la posición {fila} porque tiene recibos asociados.");
+                }
+            }
+
+            await connection.ExecuteAsync(new CommandDefinition(
+                "UPDATE dbo.DetOrdenCompra SET IdEstado = 6 WHERE IdOc = @IdOc AND Fila IN @Filas;",
+                new { IdOc = idOc, Filas = filasUnicas }, transaction, cancellationToken: cancellationToken));
+
+            var activas = await connection.ExecuteScalarAsync<int>(new CommandDefinition(
+                "SELECT COUNT(*) FROM dbo.DetOrdenCompra WHERE IdOc = @IdOc AND ISNULL(IdEstado, 0) <> 6;",
+                new { IdOc = idOc }, transaction, cancellationToken: cancellationToken));
+            var ocRechazada = activas == 0;
+            if (ocRechazada)
+            {
+                // Sin posiciones vigentes la OC queda rechazada (IdEstado 6 de cabecera, igual que el rechazo completo).
+                await connection.ExecuteAsync(new CommandDefinition(
+                    "UPDATE dbo.CabOrdenCompra SET IdEstado = 6 WHERE IdOc = @IdOc;",
+                    new { IdOc = idOc }, transaction, cancellationToken: cancellationToken));
+            }
+
+            var totales = await connection.QuerySingleAsync<TotalesCabecera>(new CommandDefinition(
+                RecalcularTotalesCabeceraSql,
+                new { IdOc = idOc }, transaction, cancellationToken: cancellationToken));
+
+            await transaction.CommitAsync(cancellationToken);
+
+            return new OrdenCompraRechazarDetalleResultDto
+            {
+                IdOc = idOc,
+                FilasRechazadas = filasUnicas.OrderBy(f => f).ToList(),
+                OcRechazada = ocRechazada,
+                Subtotal = totales.Subtotal,
+                Igv = totales.Igv,
+                Total = totales.Total,
+            };
+        }
+        catch
+        {
+            await transaction.RollbackAsync(CancellationToken.None);
+            throw;
+        }
     }
 
     public async Task<int> InsertarAsync(

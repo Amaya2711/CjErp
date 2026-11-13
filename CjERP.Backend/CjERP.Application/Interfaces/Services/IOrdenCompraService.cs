@@ -33,6 +33,15 @@ public interface IOrdenCompraService
         int fila,
         CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Rechaza (IdEstado = 6) una o más posiciones de la orden sin eliminarlas. Todo o nada: si alguna tiene recibos
+    /// asociados no rechazados, ya está rechazada o no existe, lanza <see cref="InvalidOperationException"/> sin cambios.
+    /// </summary>
+    Task<OrdenCompraRechazarDetalleResultDto> RechazarDetalleAsync(
+        int idOc,
+        IReadOnlyCollection<int> filas,
+        CancellationToken cancellationToken = default);
+
     Task RechazarMasivoAsync(
         OrdenCompraRechazoMasivoRequestDto request,
         CancellationToken cancellationToken = default);

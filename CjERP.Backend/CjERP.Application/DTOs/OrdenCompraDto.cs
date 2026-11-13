@@ -117,6 +117,8 @@ public class OrdenCompraDetalleDto
     public int? IdValidador { get; set; }
     public int? IdGestor { get; set; }
     public string Gestor { get; set; } = string.Empty;
+    // DetOrdenCompra.IdEstado de la posición (6 = rechazada). Lo completa el servicio; el SP no lo devuelve.
+    public int? IdEstadoDetalle { get; set; }
 }
 
 public class OrdenCompraInsertDetalleDto
@@ -173,6 +175,23 @@ public class OrdenCompraEliminarDetalleResultDto
     public decimal Cantidad { get; set; }
     public decimal PrecioUnitario { get; set; }
     public int PosicionesRestantes { get; set; }
+    public decimal Subtotal { get; set; }
+    public decimal Igv { get; set; }
+    public decimal Total { get; set; }
+}
+
+/// <summary>Rechazo (no eliminación) de una o más posiciones de una OC: DetOrdenCompra.IdEstado = 6.</summary>
+public class OrdenCompraRechazarDetalleRequestDto
+{
+    public List<int> Filas { get; set; } = [];
+    public string Observacion { get; set; } = string.Empty;
+}
+
+public class OrdenCompraRechazarDetalleResultDto
+{
+    public int IdOc { get; set; }
+    public List<int> FilasRechazadas { get; set; } = [];
+    public bool OcRechazada { get; set; }
     public decimal Subtotal { get; set; }
     public decimal Igv { get; set; }
     public decimal Total { get; set; }

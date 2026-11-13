@@ -212,6 +212,60 @@ public class OrdenCompraController : ControllerBase
         return Ok(new { success = true, message = "Posición eliminada correctamente.", data = resultado });
     }
 
+    /// <summary>Rechaza (sin eliminar) una o más posiciones de la OC; deben carecer de recibos asociados no rechazados.</summary>
+    [HttpPost("{idOc:int}/detalle/rechazar")]
+    public async Task<IActionResult> RechazarDetalle(
+        int idOc,
+        [FromBody] OrdenCompraRechazarDetalleRequestDto request,
+        CancellationToken cancellationToken)
+    {
+        if (idOc <= 0 || request?.Filas is null || request.Filas.Count == 0)
+        {
+            return BadRequest(new { success = false, message = "Seleccione al menos una posición para rechazar." });
+        }
+
+        if (string.IsNullOrWhiteSpace(request.Observacion))
+        {
+            return BadRequest(new { success = false, message = "Debe ingresar el motivo del rechazo." });
+        }
+
+        OrdenCompraRechazarDetalleResultDto resultado;
+        try
+        {
+            resultado = await _ordenCompraService.RechazarDetalleAsync(idOc, request.Filas, cancellationToken);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { success = false, message = ex.Message });
+        }
+
+        try
+        {
+            var usuario = ResolveUsuarioAccion();
+            await _auditoriaCambiosService.RegistrarLoteAsync(
+                resultado.FilasRechazadas.Select(fila => new AuditoriaCambioDto
+                {
+                    Modulo = "FacturacionFinanciera",
+                    Entidad = "OrdenCompraDetalle",
+                    IdRegistro = idOc.ToString(CultureInfo.InvariantCulture),
+                    Accion = "UPDATE",
+                    Seccion = $"Fila {fila.ToString(CultureInfo.InvariantCulture)}",
+                    Campo = "Estado",
+                    ValorAnterior = null,
+                    ValorNuevo = "Rechazado",
+                    UsuarioAccion = usuario,
+                    Observacion = $"Rechazo de posición. Motivo: {request.Observacion.Trim()}"
+                }),
+                cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "No se pudo registrar la auditoría del rechazo de posiciones de la OC {IdOc}", idOc);
+        }
+
+        return Ok(new { success = true, message = "Posición(es) rechazada(s) correctamente.", data = resultado });
+    }
+
     [HttpPost("archivo")]
     [Consumes("multipart/form-data")]
     [RequestSizeLimit(25_000_000)]

@@ -13,6 +13,7 @@ import {
   buscarOrdenCompraDetalle,
   buscarMontoOcOrdenCompra,
   eliminarDetalleOrdenCompra,
+  rechazarDetalleOrdenCompra,
   buscarRecibosAsociadosOrdenCompra,
   buscarRecibosSinAsociarOrdenCompra,
   descargarArchivoOrdenCompra,
@@ -979,6 +980,12 @@ export default function OcV2Page() {
   // Rechazo desde la pestaña Relación: el backend valida que la OC no tenga recibos asociados.
   const [rechazoSoloSinRecibos, setRechazoSoloSinRecibos] = useState(false);
   const [verificandoRechazoOc, setVerificandoRechazoOc] = useState<number | null>(null);
+  // Relación > Detalle: rechazo de una o más posiciones (filas de DetOrdenCompra) sin recibos asociados.
+  const [posicionesSeleccionadas, setPosicionesSeleccionadas] = useState<string[]>([]);
+  const [confirmarRechazoPosiciones, setConfirmarRechazoPosiciones] = useState(false);
+  const [rechazandoPosiciones, setRechazandoPosiciones] = useState(false);
+  const [motivoRechazoPosiciones, setMotivoRechazoPosiciones] = useState("");
+  const [errorRechazoPosiciones, setErrorRechazoPosiciones] = useState("");
   const [aprobando, setAprobando] = useState(false);
   // El Reporte abre en OC/Gastos: parte con los filtros por defecto de esa pestaña (estados incluidos).
   const [reporteFiltros, setReporteFiltros] = useState<ReporteFiltros>(() => createReporteFiltros("oc-gastos"));
@@ -2983,6 +2990,49 @@ export default function OcV2Page() {
     }
   }, [abrirRechazo]);
 
+  // Relación > Detalle: rechaza (IdEstado = 6, sin eliminar) las posiciones marcadas; siguen visibles con estado
+  // "Rechazada". Todo o nada: el backend rechaza el lote completo si alguna tiene recibos asociados no rechazados.
+  const posicionesRechazables = detalles.filter(
+    (item) => posicionesSeleccionadas.includes(`${item.idOc}-${item.fila}-${item.idCliente}-${item.idProyecto}`)
+      && item.fila != null && item.idEstadoDetalle !== 6,
+  );
+  const cerrarRechazoPosiciones = () => {
+    setConfirmarRechazoPosiciones(false);
+    setMotivoRechazoPosiciones("");
+    setErrorRechazoPosiciones("");
+  };
+  const rechazarPosicionesSeleccionadas = async () => {
+    const idOc = selectedOcId;
+    if (!idOc || posicionesRechazables.length === 0) return;
+    if (!motivoRechazoPosiciones.trim()) {
+      setErrorRechazoPosiciones("Debe ingresar el motivo del rechazo.");
+      return;
+    }
+
+    setRechazandoPosiciones(true);
+    setErrorRechazoPosiciones("");
+    try {
+      const filas = posicionesRechazables.map((item) => item.fila as number);
+      const resultado = await rechazarDetalleOrdenCompra(idOc, filas, motivoRechazoPosiciones.trim());
+      cerrarRechazoPosiciones();
+      setError("");
+      setMessage(
+        `Posición(es) rechazada(s) en la OC ${idOc}: ${filas.sort((a, b) => a - b).join(", ")}.${resultado?.ocRechazada ? " La OC quedó rechazada por no tener posiciones vigentes." : ""}`,
+      );
+      setPosicionesSeleccionadas([]);
+      try {
+        await loadDetalles(idOc, true);
+        await loadCabeceras();
+      } catch {
+        // Las posiciones ya se rechazaron; el listado se actualizará en la próxima carga.
+      }
+    } catch (err) {
+      setErrorRechazoPosiciones(getHttpErrorMessage(err, "No se pudo rechazar las posiciones."));
+    } finally {
+      setRechazandoPosiciones(false);
+    }
+  };
+
   const abrirPopupMotivoRechazo = useCallback(() => {
     setMostrarConfirmacionRechazo(false);
     setMostrarMotivoRechazo(true);
@@ -3249,9 +3299,23 @@ export default function OcV2Page() {
       ? ["grpSolicitanteResponsable"]
       : [];
 
+  // Al cambiar de OC o salir de Relación se limpia la selección de posiciones.
+  useEffect(() => {
+    setPosicionesSeleccionadas([]);
+  }, [selectedOcId, enRelacion]);
+
   const detalleKey = (item: OrdenCompraDetalleDto) => `${item.idOc}-${item.fila}-${item.idCliente}-${item.idProyecto}`;
   const detalleGridColumns: GridColumn<OrdenCompraDetalleDto>[] = [
     { dataField: "fila", caption: "Fila", dataType: "number", width: 70, alignment: "left", calculateCellValue: (item) => item.fila ?? null },
+    {
+      dataField: "estadoPosicion",
+      caption: "Estado pos.",
+      width: 110,
+      calculateCellValue: (item) => (item.idEstadoDetalle === 6 ? "Rechazada" : ""),
+      cellRender: (_value, item) => item.idEstadoDetalle === 6
+        ? <span style={{ color: "#B91C1C", background: "#FEE2E2", borderRadius: 999, padding: "1px 8px", fontWeight: 600, fontSize: 12 }}>Rechazada</span>
+        : null,
+    },
     { dataField: "nombreCliente", caption: "Cliente", width: 180, calculateCellValue: (item) => item.nombreCliente ?? "" },
     { dataField: "nombreProyecto", caption: "Proyecto", width: 180, calculateCellValue: (item) => item.nombreProyecto ?? "" },
     { dataField: "idSite", caption: "Id Site", width: 100, calculateCellValue: (item) => item.idSite ?? "" },
@@ -3883,6 +3947,17 @@ export default function OcV2Page() {
               </div>
             )
           ) : null}
+          {selectedCabecera && enRelacion && detalleOcTab === "detalle" ? (
+            <button
+              type="button"
+              style={styles.rejectButton}
+              disabled={posicionesRechazables.length === 0 || rechazandoPosiciones || getEstadoVista(selectedCabecera) === "rechazadas"}
+              title="Rechazar las posiciones marcadas (solo si no tienen recibos asociados)"
+              onClick={() => setConfirmarRechazoPosiciones(true)}
+            >
+              {rechazandoPosiciones ? "Rechazando..." : `Rechazar posiciones${posicionesRechazables.length ? ` (${posicionesRechazables.length})` : ""}`}
+            </button>
+          ) : null}
           {selectedCabecera ? (
             <button
               type="button"
@@ -3925,6 +4000,9 @@ export default function OcV2Page() {
             noDataText="Sin posiciones para mostrar."
             focusedRowKey={detalleSeleccionado ? detalleKey(detalleSeleccionado) : null}
             onRowClick={(item) => setDetalleSeleccionado(item)}
+            {...(enRelacion
+              ? { selection: "multiple" as const, selectedKeys: posicionesSeleccionadas, onSelectionChanged: (keys: string[]) => setPosicionesSeleccionadas(keys) }
+              : {})}
             paging={false}
             allowExport={false}
             showGroupPanel={false}
@@ -4641,6 +4719,35 @@ export default function OcV2Page() {
             </>
           ) : null}
         </section>
+      ) : null}
+
+      {confirmarRechazoPosiciones ? (
+        <div style={styles.modalOverlay}>
+          <div style={styles.modalCardSmall}>
+            <h3 style={{ marginTop: 0, marginBottom: 12, color: "#17143A" }}>Rechazar posiciones</h3>
+            <p style={{ marginTop: 0, color: "#4B5563", lineHeight: 1.6 }}>
+              ¿Desea rechazar {posicionesRechazables.length === 1 ? "la posición" : <>las <strong>{posicionesRechazables.length}</strong> posiciones</>}{" "}
+              (fila {posicionesRechazables.map((item) => item.fila).join(", ")}) de la OC <strong>{selectedOcId}</strong>?
+              Seguirán visibles con estado Rechazada. Solo se permite si no tienen recibos asociados.
+            </p>
+            <textarea
+              value={motivoRechazoPosiciones}
+              onChange={(event) => setMotivoRechazoPosiciones(event.target.value)}
+              placeholder="Motivo del rechazo"
+              rows={3}
+              style={{ width: "100%", boxSizing: "border-box", padding: 8, border: "1px solid #CBD5E1", borderRadius: 8, fontFamily: "inherit" }}
+            />
+            {errorRechazoPosiciones ? <div style={{ ...styles.errorBanner, marginTop: 8 }}>{errorRechazoPosiciones}</div> : null}
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 20 }}>
+              <button type="button" style={styles.secondaryButton} onClick={cerrarRechazoPosiciones} disabled={rechazandoPosiciones}>
+                Cancelar
+              </button>
+              <button type="button" style={styles.rejectButton} onClick={() => void rechazarPosicionesSeleccionadas()} disabled={rechazandoPosiciones}>
+                {rechazandoPosiciones ? "Rechazando..." : "Rechazar"}
+              </button>
+            </div>
+          </div>
+        </div>
       ) : null}
 
       <ConfirmDialog
