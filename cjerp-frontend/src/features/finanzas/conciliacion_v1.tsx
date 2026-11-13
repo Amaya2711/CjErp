@@ -461,7 +461,8 @@ function calculateMontoDiferencia(
     return null;
   }
 
-  return monto - totalPagar;
+  // Redondeo a 2 decimales: evita diferencias ocultas por decimales de más en TotalPagar.
+  return roundCurrencyValue(roundCurrencyValue(monto) - roundCurrencyValue(totalPagar));
 }
 
 function parseNumericValue(value?: string | number | null): number {

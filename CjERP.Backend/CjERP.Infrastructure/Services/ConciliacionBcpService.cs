@@ -2177,7 +2177,7 @@ ORDER BY rc.IdAreaFlujo, rc.IdReferencia, rc.IdCuentaContable, rc.Orden, rc.IdRe
                     return null;
                 }
 
-                if (amountDifference != 0)
+                if (amountDifference is null || amountDifference > ToleranciaMontoConciliacion)
                 {
                     return null;
                 }
@@ -2250,6 +2250,9 @@ ORDER BY rc.IdAreaFlujo, rc.IdReferencia, rc.IdCuentaContable, rc.Orden, rc.IdRe
         return null;
     }
 
+    // Tolerancia (en la moneda del movimiento) para dar por coincidente un monto: diferencias de hasta 0.10 se aceptan.
+    private const decimal ToleranciaMontoConciliacion = 0.10m;
+
     private static decimal? CalculateAmountDifferenceAbsolute(decimal? montoMovimiento, decimal? totalPagar)
     {
         if (!montoMovimiento.HasValue || !totalPagar.HasValue)
@@ -2257,7 +2260,10 @@ ORDER BY rc.IdAreaFlujo, rc.IdReferencia, rc.IdCuentaContable, rc.Orden, rc.IdRe
             return null;
         }
 
-        return Math.Abs(Math.Abs(montoMovimiento.Value) - Math.Abs(totalPagar.Value));
+        // Se compara a 2 decimales (lo que ve el usuario): Planilla.TotalPagar puede traer decimales ocultos (ej. 45000.0032).
+        var movimientoRedondeado = Math.Round(Math.Abs(montoMovimiento.Value), 2, MidpointRounding.AwayFromZero);
+        var totalRedondeado = Math.Round(Math.Abs(totalPagar.Value), 2, MidpointRounding.AwayFromZero);
+        return Math.Abs(movimientoRedondeado - totalRedondeado);
     }
 
     private static int? CalculateDateDifferenceDays(DateTime? fechaMovimiento, DateTime? fechaPlanilla)
