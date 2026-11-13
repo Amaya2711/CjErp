@@ -9,6 +9,7 @@ import {
   aprobarOrdenCompra,
   actualizarOrdenCompra,
   asociarRecibosOrdenCompra,
+  desasociarRecibosOrdenCompra,
   buscarOrdenCompraCabecera,
   buscarOrdenCompraDetalle,
   buscarMontoOcOrdenCompra,
@@ -770,6 +771,10 @@ export default function OcV2Page() {
   const [recibosSinAsociar, setRecibosSinAsociar] = useState<OrdenCompraReciboDto[]>([]);
   const [recibosLoading, setRecibosLoading] = useState(false);
   const [recibosSeleccionados, setRecibosSeleccionados] = useState<number[]>([]);
+  // Recibos asociados marcados para desasociar de la OC (Relación > Recibos asociados).
+  const [recibosADesasociar, setRecibosADesasociar] = useState<number[]>([]);
+  const [confirmarDesasociar, setConfirmarDesasociar] = useState(false);
+  const [desasociandoRecibos, setDesasociandoRecibos] = useState(false);
   const [asociandoRecibos, setAsociandoRecibos] = useState(false);
   const [montoOcRows, setMontoOcRows] = useState<OrdenCompraMontoOcDto[]>([]);
   const [montoOcLoading, setMontoOcLoading] = useState(false);
@@ -2776,7 +2781,8 @@ export default function OcV2Page() {
     setDetallePorEliminar(null);
     if (!detalle) return;
 
-    const posicion = draft.detalles.findIndex((item) => item.tempId === detalle.tempId) + 1;
+    // Fila real de DetOrdenCompra (la misma que muestra la grilla y que valida el backend); sin fila = posición nueva.
+    const posicion = detalle.fila ?? draft.detalles.findIndex((item) => item.tempId === detalle.tempId) + 1;
     const quitarDelBorrador = () => {
       setDraft((prev) => ({ ...prev, detalles: prev.detalles.filter((item) => item.tempId !== detalle.tempId) }));
       if (editingDetalleId === detalle.tempId) {
@@ -3172,6 +3178,26 @@ export default function OcV2Page() {
     }
   }, [detalleSeleccionado?.fila, loadRecibosOc, nivelAsociacion, recibosSeleccionados, selectedOcId]);
 
+  // Relación > Recibos asociados: Planilla.IdOc y Fila pasan a NULL para los correlativos marcados.
+  const desasociarRecibosSeleccionados = async () => {
+    setConfirmarDesasociar(false);
+    if (!selectedOcId || recibosADesasociar.length === 0) return;
+
+    setDesasociandoRecibos(true);
+    setError("");
+    setMessage("");
+    try {
+      const result = await desasociarRecibosOrdenCompra({ idOc: selectedOcId, correlativos: recibosADesasociar });
+      setRecibosADesasociar([]);
+      setMessage(`${result.desasociados} recibo(s) desasociado(s) correctamente.`);
+      await loadRecibosOc(selectedOcId, detalleSeleccionado?.fila ?? null);
+    } catch (err) {
+      setError(getHttpErrorMessage(err, "No se pudo desasociar los recibos seleccionados."));
+    } finally {
+      setDesasociandoRecibos(false);
+    }
+  };
+
   const normalizarTexto = (value: string | null | undefined) => value?.trim() ?? "";
   const solicitanteBandeja = (item: OrdenCompraCabeceraDto) =>
     item.solicitanteCabecera?.trim() || item.solicitante?.trim() || "Sin solicitante";
@@ -3303,6 +3329,11 @@ export default function OcV2Page() {
   useEffect(() => {
     setPosicionesSeleccionadas([]);
   }, [selectedOcId, enRelacion]);
+
+  // Los recibos marcados para desasociar pertenecen a la OC/posición mostrada: se limpian al cambiarla.
+  useEffect(() => {
+    setRecibosADesasociar([]);
+  }, [selectedOcId, detalleSeleccionado?.fila, enRelacion]);
 
   const detalleKey = (item: OrdenCompraDetalleDto) => `${item.idOc}-${item.fila}-${item.idCliente}-${item.idProyecto}`;
   const detalleGridColumns: GridColumn<OrdenCompraDetalleDto>[] = [
@@ -4017,16 +4048,33 @@ export default function OcV2Page() {
           <div>
             <div style={styles.receiptToolbar}>
               <strong>Recibos asociados</strong>
-              <span style={styles.counterPill}>{recibosLoading ? "Cargando..." : `${recibosAsociados.length} recibos`}</span>
+              <div style={styles.actionRow}>
+                <span style={styles.counterPill}>{recibosLoading ? "Cargando..." : `${recibosAsociados.length} recibos`}</span>
+                {enRelacion ? (
+                  <button
+                    type="button"
+                    style={styles.rejectButton}
+                    disabled={desasociandoRecibos || recibosADesasociar.length === 0}
+                    title="Quita el recibo de la OC (IdOc y Fila quedan en NULL)"
+                    onClick={() => setConfirmarDesasociar(true)}
+                  >
+                    {desasociandoRecibos ? "Desasociando..." : `Desasociar ${recibosADesasociar.length || ""}`.trim()}
+                  </button>
+                ) : null}
+              </div>
             </div>
             <RecibosOrdenCompraTable
               rows={recibosAsociados}
               loading={recibosLoading}
               emptyText={selectedCabecera ? "No hay recibos asociados para la posición seleccionada." : "Seleccione una cabecera para visualizar los recibos asociados."}
-              selectable={false}
+              selectable={enRelacion}
               hideIgvAndTotal
-              selectedIds={[]}
-              onToggle={() => undefined}
+              selectedIds={enRelacion ? recibosADesasociar : []}
+              onToggle={(correlativo, checked) => setRecibosADesasociar((prev) =>
+                checked
+                  ? Array.from(new Set([...prev, correlativo]))
+                  : prev.filter((item) => item !== correlativo)
+              )}
               onDetalleClick={setDetalleCompleto}
               onCorrelativoClick={(recibo) => visualizarGastoPorCorrelativo(recibo.correlativo)}
             />
@@ -4721,6 +4769,24 @@ export default function OcV2Page() {
         </section>
       ) : null}
 
+      <ConfirmDialog
+        open={confirmarDesasociar}
+        title="Desasociar recibos"
+        destructive
+        message={
+          <>
+            ¿Desea desasociar {recibosADesasociar.length === 1 ? "el recibo" : <>los <strong>{recibosADesasociar.length}</strong> recibos</>}{" "}
+            ({recibosADesasociar.join(", ")}) de la OC <strong>{selectedOcId}</strong>?
+            <br />
+            Quedarán sin OC ni fila y podrán asociarse de nuevo.
+          </>
+        }
+        confirmLabel="Desasociar"
+        cancelLabel="Cancelar"
+        onCancel={() => setConfirmarDesasociar(false)}
+        onConfirm={() => void desasociarRecibosSeleccionados()}
+      />
+
       {confirmarRechazoPosiciones ? (
         <div style={styles.modalOverlay}>
           <div style={styles.modalCardSmall}>
@@ -4757,7 +4823,7 @@ export default function OcV2Page() {
         message={detallePorEliminar ? (
           <>
             ¿Desea eliminar la posición{" "}
-            <strong>{draft.detalles.findIndex((item) => item.tempId === detallePorEliminar.tempId) + 1}</strong>
+            <strong>{detallePorEliminar.fila ?? draft.detalles.findIndex((item) => item.tempId === detallePorEliminar.tempId) + 1}</strong>
             {detallePorEliminar.detalle ? <> ({detallePorEliminar.detalle.slice(0, 80)})</> : null}?
             <br />
             {editingOcId && detallePorEliminar.fila != null
@@ -6290,7 +6356,8 @@ const DraftDetalleTable = React.memo(function DraftDetalleTable({
     const igv = subtotal * tasaIgvPorComprobante(item.comprobante);
     return { subtotal, igv, total: subtotal + igv };
   };
-  const indiceDe = (item: OrdenCompraDraftDetalle) => detalles.indexOf(item) + 1;
+  // Fila real de DetOrdenCompra (coincide con los mensajes del backend); posiciones nuevas aún sin fila: su orden en la lista.
+  const indiceDe = (item: OrdenCompraDraftDetalle) => item.fila ?? detalles.indexOf(item) + 1;
   const tipoTrabajoDe = (item: OrdenCompraDraftDetalle) => item.filtroOperativo.tipoTrabajo?.tipoTrabajo ?? item.filtroOperativo.filtro?.tipoTrabajo ?? "";
 
   const columns: GridColumn<OrdenCompraDraftDetalle>[] = [

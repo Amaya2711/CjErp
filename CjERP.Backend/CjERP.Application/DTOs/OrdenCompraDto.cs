@@ -308,6 +308,28 @@ public class OrdenCompraAsociarRecibosResultDto
     public int Asociados { get; set; }
 }
 
+/// <summary>Desasocia recibos de una OC: Planilla.IdOc = NULL y Planilla.Fila = NULL por correlativo.</summary>
+public class OrdenCompraDesasociarRecibosRequestDto
+{
+    public int IdOc { get; set; }
+    public List<int> Correlativos { get; set; } = [];
+}
+
+public class OrdenCompraDesasociarRecibosResultDto
+{
+    public int IdOc { get; set; }
+    public int Solicitados { get; set; }
+    public int Desasociados { get; set; }
+    /// <summary>Correlativos que se desasociaron (para auditoría).</summary>
+    public List<OrdenCompraReciboDesasociadoDto> Recibos { get; set; } = [];
+}
+
+public class OrdenCompraReciboDesasociadoDto
+{
+    public int Correlativo { get; set; }
+    public int? Fila { get; set; }
+}
+
 public sealed class OrdenCompraGenerarPagoNuevoRequestDto
 {
     public int IdOc { get; set; }

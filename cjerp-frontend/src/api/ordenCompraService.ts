@@ -401,6 +401,17 @@ export async function buscarRecibosSinAsociarOrdenCompra(params: OrdenCompraReci
   return await httpClient.get<OrdenCompraReciboDto[]>("/facturacionfinanciera/oc/recibos/sin-asociar", { params });
 }
 
+export type OrdenCompraDesasociarRecibosResult = {
+  idOc: number;
+  solicitados: number;
+  desasociados: number;
+};
+
+/** Desasocia recibos de la OC: Planilla.IdOc = NULL y Fila = NULL por correlativo. */
+export async function desasociarRecibosOrdenCompra(payload: { idOc: number; correlativos: number[] }) {
+  return await httpClient.post<OrdenCompraDesasociarRecibosResult>("/facturacionfinanciera/oc/recibos/desasociar", payload);
+}
+
 export async function asociarRecibosOrdenCompra(payload: OrdenCompraAsociarRecibosPayload) {
   return await httpClient.post<OrdenCompraAsociarRecibosResult>("/facturacionfinanciera/oc/recibos/asociar", payload);
 }

@@ -70,6 +70,14 @@ public interface IOrdenCompraService
         OrdenCompraAsociarRecibosRequestDto request,
         CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Desasocia recibos de la OC (Planilla.IdOc = NULL, Planilla.Fila = NULL por correlativo). Solo afecta recibos
+    /// que pertenezcan a esa OC; lanza <see cref="InvalidOperationException"/> si los datos no son válidos.
+    /// </summary>
+    Task<OrdenCompraDesasociarRecibosResultDto> DesasociarRecibosAsync(
+        OrdenCompraDesasociarRecibosRequestDto request,
+        CancellationToken cancellationToken = default);
+
     Task<IEnumerable<OrdenCompraMontoOcDto>> BuscarMontoOcAsync(
         OrdenCompraRecibosRequestDto request,
         CancellationToken cancellationToken = default);

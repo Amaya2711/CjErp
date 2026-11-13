@@ -101,6 +101,7 @@
 | GET /{idOc}/edicion · PUT /{idOc} | SQL inline; PUT en tx con `MAX(Fila)+1` | oc_v1 |
 | DELETE /{idOc}/detalle/{fila} | tx: borra la fila de `DetOrdenCompra` y recalcula Subtotal/Igv/Total de `CabOrdenCompra`; rechaza (400) si tiene recibos (`Planilla.IdOc/Fila`) o es la última posición; audita DELETE | oc_v2 |
 | POST /{idOc}/detalle/rechazar | tx todo-o-nada: `DetOrdenCompra.IdEstado = 6` en las filas indicadas (no las elimina; motivo obligatorio, audita); 400 si alguna tiene recibos no rechazados (`Planilla.Estado <> 3`) o ya está rechazada; si no quedan posiciones vigentes ⇒ `CabOrdenCompra.IdEstado = 6`; recalcula totales sin las rechazadas. `GET /detalle` devuelve `idEstadoDetalle`. `sp_OrdenCompra_RechazarMasivo` (script `Database/OrdenCompra/03`) deja `Planilla.IdOc/Fila = NULL` | oc_v2 (Relación) |
+| POST /recibos/desasociar | tx: `Planilla.IdOc = NULL`, `Fila = NULL` por correlativo, solo si el recibo pertenece a la OC indicada; audita. `GET /recibos/sin-asociar` incluye `Planilla.Estado IN (0,1,2,4,5,6,7)` | oc_v2 (Relación > Recibos asociados) |
 | POST /aprobar | tx; UPDATE `IdAprobador{n}` Cab/Det; nivel 3 ⇒ IdEstado=1 | oc_v1 (pestañas `tab.validacion_2/3` vía SegPermisoAccion **solo FE**) |
 | POST /rechazar-masivo | `sp_OrdenCompra_RechazarMasivo` (IdRechazador del body) | oc, oc_v1 |
 | POST /detalle/editar | SQL dinámico con lista blanca | oc_v1 |

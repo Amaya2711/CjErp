@@ -210,7 +210,7 @@ public class OrdenCompraService : IOrdenCompraService
         LEFT JOIN dbo.Constante e ON e.Campo = 'ESTADO' AND a.Estado = e.Correlativo
         LEFT JOIN dbo.Constante f ON f.Campo = 'TAREA' AND f.Correlativo = a.IdTarea
         WHERE (a.Fila IS NULL OR TRY_CONVERT(varchar(50), a.Fila) = '')
-          AND a.Estado IN (0, 1, 4, 5, 6)
+          AND a.Estado IN (0, 1, 2, 4, 5, 6, 7)
           AND (a.IdOc IS NULL OR LTRIM(RTRIM(CONVERT(varchar(50), a.IdOc))) = '')
           AND EXISTS (
               SELECT 1
@@ -1676,6 +1676,96 @@ public class OrdenCompraService : IOrdenCompraService
             await transaction.RollbackAsync(cancellationToken);
             throw;
         }
+    }
+
+    public async Task<OrdenCompraDesasociarRecibosResultDto> DesasociarRecibosAsync(
+        OrdenCompraDesasociarRecibosRequestDto request,
+        CancellationToken cancellationToken = default)
+    {
+        if (request.IdOc <= 0)
+        {
+            throw new InvalidOperationException("Debe indicar la OC de la que se desasocian los recibos.");
+        }
+
+        var correlativos = request.Correlativos
+            .Where(item => item > 0)
+            .Distinct()
+            .ToArray();
+
+        if (correlativos.Length == 0)
+        {
+            throw new InvalidOperationException("Seleccione al menos un recibo para desasociar.");
+        }
+
+        await using var connection = _sqlCommandFactory.CreateConnection();
+        await connection.OpenAsync(cancellationToken);
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+
+        try
+        {
+            var resultado = new OrdenCompraDesasociarRecibosResultDto
+            {
+                IdOc = request.IdOc,
+                Solicitados = correlativos.Length
+            };
+
+            foreach (var correlativo in correlativos)
+            {
+                // Solo se toca si el recibo pertenece a la OC indicada. Fila anterior: para la auditoría
+                // (sin OUTPUT: Planilla tiene triggers y OUTPUT directo al cliente no está permitido).
+                var filaAnterior = await connection.QuerySingleOrDefaultAsync<DesasociarReciboFila>(
+                    new CommandDefinition(
+                        """
+                        SELECT TOP 1 TRY_CONVERT(int, Fila) AS Fila
+                        FROM dbo.Planilla
+                        WHERE Correlativo = @Correlativo
+                          AND TRY_CONVERT(int, NULLIF(LTRIM(RTRIM(CONVERT(varchar(50), IdOc))), '')) = @IdOc;
+                        """,
+                        new { Correlativo = correlativo, request.IdOc },
+                        transaction,
+                        cancellationToken: cancellationToken,
+                        commandTimeout: 120));
+
+                if (filaAnterior is null)
+                {
+                    continue;
+                }
+
+                await connection.ExecuteAsync(
+                    new CommandDefinition(
+                        """
+                        UPDATE dbo.Planilla
+                        SET IdOc = NULL,
+                            Fila = NULL
+                        WHERE Correlativo = @Correlativo
+                          AND TRY_CONVERT(int, NULLIF(LTRIM(RTRIM(CONVERT(varchar(50), IdOc))), '')) = @IdOc;
+                        """,
+                        new { Correlativo = correlativo, request.IdOc },
+                        transaction,
+                        cancellationToken: cancellationToken,
+                        commandTimeout: 120));
+
+                resultado.Recibos.Add(new OrdenCompraReciboDesasociadoDto
+                {
+                    Correlativo = correlativo,
+                    Fila = filaAnterior.Fila
+                });
+            }
+
+            resultado.Desasociados = resultado.Recibos.Count;
+            await transaction.CommitAsync(cancellationToken);
+            return resultado;
+        }
+        catch
+        {
+            await transaction.RollbackAsync(CancellationToken.None);
+            throw;
+        }
+    }
+
+    private sealed class DesasociarReciboFila
+    {
+        public int? Fila { get; set; }
     }
 
     public async Task<IEnumerable<OrdenCompraMontoOcDto>> BuscarMontoOcAsync(

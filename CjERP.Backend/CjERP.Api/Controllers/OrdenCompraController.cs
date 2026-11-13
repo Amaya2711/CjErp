@@ -786,6 +786,59 @@ public class OrdenCompraController : ControllerBase
         }
     }
 
+    /// <summary>Desasocia recibos de la OC: Planilla.IdOc = NULL y Planilla.Fila = NULL por correlativo.</summary>
+    [HttpPost("recibos/desasociar")]
+    public async Task<IActionResult> DesasociarRecibos(
+        [FromBody] OrdenCompraDesasociarRecibosRequestDto request,
+        CancellationToken cancellationToken)
+    {
+        if (request is null)
+        {
+            return BadRequest(new { success = false, message = "Debe enviar los recibos a desasociar." });
+        }
+
+        OrdenCompraDesasociarRecibosResultDto data;
+        try
+        {
+            request.Correlativos = request.Correlativos.Where(item => item > 0).Distinct().ToList();
+            data = await _ordenCompraService.DesasociarRecibosAsync(request, cancellationToken);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { success = false, message = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { success = false, message = ex.Message, detail = ex.ToString() });
+        }
+
+        try
+        {
+            var usuario = ResolveUsuarioAccion();
+            await _auditoriaCambiosService.RegistrarLoteAsync(
+                data.Recibos.Select(recibo => new AuditoriaCambioDto
+                {
+                    Modulo = "FacturacionFinanciera",
+                    Entidad = "Planilla",
+                    IdRegistro = recibo.Correlativo.ToString(CultureInfo.InvariantCulture),
+                    Accion = "UPDATE",
+                    Seccion = "OrdenCompra",
+                    Campo = "IdOc/Fila",
+                    ValorAnterior = $"OC {data.IdOc} / Fila {recibo.Fila?.ToString(CultureInfo.InvariantCulture) ?? "-"}",
+                    ValorNuevo = null,
+                    UsuarioAccion = usuario,
+                    Observacion = "Desasociacion de recibo de orden de compra."
+                }),
+                cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "No se pudo registrar la auditoría de la desasociación de recibos de la OC {IdOc}", request.IdOc);
+        }
+
+        return Ok(new { success = true, message = "Recibo(s) desasociado(s) correctamente.", data });
+    }
+
     private static int? GetNumericUserId(string? claimValue)
     {
         return int.TryParse(claimValue, out var parsed) ? parsed : null;
