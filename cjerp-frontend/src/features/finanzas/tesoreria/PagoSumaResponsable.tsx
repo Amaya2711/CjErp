@@ -46,6 +46,7 @@ const ESTADOS_SUMA: Array<{ codigo: number; nombre: string; color: string }> = [
   { codigo: 4, nombre: "Pagado", color: "#16A34A" },
   { codigo: 6, nombre: "Estado 6", color: "#F59E0B" },
   { codigo: 0, nombre: "Estado 0", color: "#64748B" },
+  { codigo: 10, nombre: "Estado 10 (Hormiga)", color: "#0EA5E9" },
 ];
 
 type Recibo = {
@@ -131,7 +132,7 @@ export default function PagoSumaResponsable({ fila, tipoCambio, request, accent,
         for (const row of rows) {
           const estado = num(pick(row, "Estado", "estado"));
           const monedaId = num(pick(row, "TipoMoneda", "tipoMoneda")) ?? 0;
-          if (estado === null || ![4, 6, 0].includes(estado) || monedaId < 1 || monedaId > 5) continue;
+          if (estado === null || ![4, 6, 0, 10].includes(estado) || monedaId < 1 || monedaId > 5) continue;
           if ((num(pick(row, "IdResponsable", "idResponsable")) ?? 0) !== idResponsable) continue;
           if ((num(pick(row, "IdTarea", "idTarea")) ?? 0) !== idTarea) continue;
 
@@ -243,7 +244,7 @@ export default function PagoSumaResponsable({ fila, tipoCambio, request, accent,
             <div style={{ fontSize: 20, fontWeight: 800, color: "#0F172A" }}>{cargando ? "…" : cantidad}</div>
           </div>
           <div style={{ fontSize: 11, color: "#64748B" }}>
-            Estados incluidos: 4 (pagado), 6 y 0 · TC: US$ {tipoCambio.usd} · € {tipoCambio.eur} · RD$ {tipoCambio.dop} · COL$ {tipoCambio.cop}
+            Estados incluidos: 4 (pagado), 6, 0 y 10 · TC: US$ {tipoCambio.usd} · € {tipoCambio.eur} · RD$ {tipoCambio.dop} · COL$ {tipoCambio.cop}
           </div>
         </div>
         {!columnasDelStore ? (

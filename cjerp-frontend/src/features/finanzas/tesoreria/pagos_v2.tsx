@@ -1112,7 +1112,7 @@ function buildHistorialOtRequest(row: PagoRow): PlanillaConsultaEstadosRequest |
   return buildPagosV1PlanillaRequest(parametros);
 }
 
-// Recibos que componen "Suma responsable" (SumaEmp del legado): estados 4, 6 y 0 del
+// Recibos que componen "Suma responsable" (SumaEmp del legado): estados 4, 6, 0 y 10 del
 // mismo cliente/proyecto/site/tipo de trabajo. El responsable y la tarea se filtran en la pestaña.
 function buildSumaResponsableRequest(row: PagoRow): PlanillaConsultaEstadosRequest | null {
   const idCliente = row?.idCliente ?? 0;
@@ -1126,7 +1126,8 @@ function buildSumaResponsableRequest(row: PagoRow): PlanillaConsultaEstadosReque
   }
 
   return buildPagosV1PlanillaRequest([
-    { nombre: "Estados", valor: "0,4,6", tipo: "string" },
+    // 10 = Hormiga: la grilla ("Suma resp.") ya lo suma; sin él el popup quedaba en 0 para recibos en Hormiga.
+    { nombre: "Estados", valor: "0,4,6,10", tipo: "string" },
     { nombre: "IncluirSumaResp", valor: "true", tipo: "bool" },
     // Solo recibos + SumaEmp: el SP omite los totales por banco/OT/OC que las bandejas sí necesitan.
     { nombre: "ModoLiviano", valor: "true", tipo: "bool" },
@@ -4270,6 +4271,9 @@ export default function PagosV2Page() {
     {
       dataField: "totalSitio",
       caption: "Total Sitio",
+      headerTooltip:
+        "Total Sitio = suma de Monto Bck de Importar para la OT/sitio (cliente, proyecto, sitio, tipo de trabajo y moneda).\n" +
+        "Si Sub Ficticio supera este valor, la fila se marca como excedida.",
       dataType: "number",
       width: 170,
       visible: showTotalSitio,
@@ -4282,6 +4286,9 @@ export default function PagosV2Page() {
     {
       dataField: "totalVisible",
       caption: "Total Visible",
+      headerTooltip:
+        "Total Visible = suma de Monto Visible de Importar para la OT/sitio (cliente, proyecto, sitio, tipo de trabajo y moneda).\n" +
+        "Se repite en cada recibo de la misma OT. Es el denominador del % Ficticio.",
       dataType: "number",
       width: 170,
       visible: showTotalSitio,
@@ -4294,6 +4301,12 @@ export default function PagosV2Page() {
     {
       dataField: "subFicticio",
       caption: "Sub Ficticio",
+      headerTooltip:
+        "Sub Ficticio = Total pagado de la OT/sitio + Subtotal de este recibo\n" +
+        "• Total pagado = suma del Subtotal de los recibos en estado PAGADO (4) de la misma OT/sitio, tipo de trabajo y moneda.\n" +
+        "• Es lo que llevaría gastado la OT si este recibo se pagara.\n" +
+        "• Una sola moneda: en esa moneda. Monedas mezcladas: todo en S/ con los tipos de cambio de la pantalla.\n" +
+        "• Mismo cálculo en todas las pestañas.",
       dataType: "number",
       width: 170,
       visible: showTotalSitio,
@@ -4325,6 +4338,10 @@ export default function PagosV2Page() {
     {
       dataField: "avanceFicticio",
       caption: "Avance ficticio",
+      headerTooltip:
+        "Avance ficticio = barra del % Ficticio\n" +
+        "% Ficticio = Sub Ficticio ÷ Total Visible × 100\n" +
+        "Color: verde < 50 %, amarillo 50–70 %, rojo > 70 %.",
       width: 140,
       visible: showTotalSitio,
       allowFiltering: false,
