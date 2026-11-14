@@ -22,6 +22,17 @@ namespace CjERP.Application.Interfaces.Services
             string usuarioAccion,
             CancellationToken cancellationToken = default);
         Task ActualizarEstadoPlanillaAsync(PlanillaActualizarEstadoRequestDto request, CancellationToken cancellationToken = default);
+        /// <summary>
+        /// Cambio manual y directo de Planilla.Estado. Exige que <paramref name="codEmpleado"/> figure en Constante
+        /// PERMISO_ESTADO (ValorIni) y que el estado exista en Constante 'estado'; lanza
+        /// <see cref="InvalidOperationException"/> si no.
+        /// </summary>
+        Task<PlanillaCambiarEstadoManualResultDto> CambiarEstadoManualAsync(
+            int correlativo,
+            PlanillaCambiarEstadoManualRequestDto request,
+            int codEmpleado,
+            string usuario,
+            CancellationToken cancellationToken = default);
         Task<PlanillaProcesarAprobacionMasivaResponseDto> ProcesarAprobacionMasivaAsync(
             IReadOnlyList<PlanillaProcesarAprobacionItemDto> registros,
             int codEstado,

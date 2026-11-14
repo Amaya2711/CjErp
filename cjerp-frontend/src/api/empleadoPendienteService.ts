@@ -16,6 +16,11 @@ export async function buscarEmpleadoPendiente(payload: EmpleadoPendienteBuscarRe
   return await httpClient.post<EmpleadoPendienteDto[]>("/administracion/pendientes/buscar", payload);
 }
 
+/** PDF con todos los pendientes agrupados por la relación empleado / responsable. */
+export async function descargarPdfEmpleadoPendiente(): Promise<Blob> {
+  return await httpClient.post<Blob>("/administracion/pendientes/pdf", {}, { responseType: "blob" });
+}
+
 export async function insertarEmpleadoPendiente(payload: EmpleadoPendienteInsertRequest) {
   return await httpClient.post("/administracion/pendientes/insertar", payload);
 }

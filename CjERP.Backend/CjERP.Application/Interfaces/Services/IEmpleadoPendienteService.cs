@@ -8,6 +8,11 @@ public interface IEmpleadoPendienteService
         EmpleadoPendienteBuscarRequestDto request,
         CancellationToken cancellationToken = default);
 
+    /// <summary>PDF con todos los pendientes agrupados por la relación empleado / responsable. Null si no hay datos.</summary>
+    Task<(byte[] Contenido, string NombreArchivo)?> GenerarPdfAsync(
+        EmpleadoPendientePdfRequestDto request,
+        CancellationToken cancellationToken = default);
+
     Task<EmpleadoPendienteCommandResultDto> InsertarAsync(
         EmpleadoPendienteInsertRequestDto request,
         CancellationToken cancellationToken = default);

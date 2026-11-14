@@ -25,7 +25,8 @@ import type {
 import { getAuthUser } from "../../../utils/authStorage";
 import { getHttpErrorMessage } from "../../../utils/httpError";
 import { compressImageForUpload } from "../../../utils/imageCompression";
-import { buildSharePointUrl } from "../../../utils/sharepoint";
+import { abrirAdjunto, esCodigoLegacy, urlVisibleAdjunto } from "../../../utils/adjuntos";
+import { useAdjuntoLegacyPreview } from "../../../hooks/useAdjuntoLegacyPreview";
 
 type ColumnFilterDropdownProps = {
   header: { key: string; label: string };
@@ -412,7 +413,7 @@ function getImageDisplayPath(path?: string | null, url?: string | null) {
   const resolved = url?.trim() || path?.trim() || "";
   if (!resolved) return "";
   if (resolved.startsWith("http")) return resolved;
-  return buildSharePointUrl(resolved);
+  return urlVisibleAdjunto(resolved);
 }
 
 function sameSuministroRow(left: LogisticaSuministroDto, right: LogisticaSuministroDto) {
@@ -768,6 +769,9 @@ export default function SuministroPage() {
   const estadoOptions = constantesPorCampo.estado_suministro ?? [];
   const validacionOptions = constantesPorCampo.ESTADO_SUMINISTRO ?? [];
   const imageDisplayPath = getImageDisplayPath(draft.imagenPath, draft.imagenUrl);
+  const imagenRaw = draft.imagenUrl?.trim() || draft.imagenPath?.trim() || "";
+  const imagenLegacy = useAdjuntoLegacyPreview(imagenRaw, esCodigoLegacy(imagenRaw) && showImageViewer);
+  const imagenVisorSrc = esCodigoLegacy(imagenRaw) ? imagenLegacy.url : imageDisplayPath;
 
   const tareaPermitidaIds = useMemo(
     () =>
@@ -1031,7 +1035,7 @@ export default function SuministroPage() {
             type="button"
             style={{ cursor: "pointer", padding: 4, borderRadius: 4, border: '1px solid #1976d2', background: '#1976d2', color: '#fff', fontSize: 16, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
             title={fullPath}
-            onClick={() => window.open(fullPath, '_blank')}
+            onClick={() => void abrirAdjunto(item.imagenUrl?.trim() || item.imagenPath).catch(() => window.alert("No se pudo abrir la imagen."))}
           >
             {/* Icono de enlace (SVG) */}
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10 13a5 5 0 0 1 7 7l-3 3a5 5 0 0 1-7-7"/><path d="M14 11a5 5 0 0 0-7-7l-3 3a5 5 0 0 0 7 7"/></svg>
@@ -1906,7 +1910,7 @@ export default function SuministroPage() {
                             >
                               x
                             </button>
-                            <img src={imageDisplayPath} alt="Imagen adjunta" style={styles.viewerImage} />
+                            {imagenLegacy.loading ? <span>Cargando imagen...</span> : imagenLegacy.error ? <span style={styles.errorText}>{imagenLegacy.error}</span> : <img src={imagenVisorSrc} alt="Imagen adjunta" style={styles.viewerImage} />}
                           </div>
                         </div>
                       ) : null}

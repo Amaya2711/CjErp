@@ -31,6 +31,8 @@ public class AuditoriaCambiosService : IAuditoriaCambiosService
     {
         var lote = cambios
             .Where(static item => item is not null)
+            // Regla: las altas (INSERT/CREAR) NO se auditan; solo modificaciones y eliminaciones.
+            .Where(static item => !EsAccionAlta(item.Accion))
             .Where(static item =>
                 !string.IsNullOrWhiteSpace(item.Modulo) &&
                 !string.IsNullOrWhiteSpace(item.Entidad) &&
@@ -164,6 +166,15 @@ public class AuditoriaCambiosService : IAuditoriaCambiosService
         ProcedureAvailabilityCache[procedureName] = available;
         return available;
     }
+
+    /// <summary>Acciones de alta que los módulos envían a auditoría (INSERT en la mayoría; CREAR en Arrendamientos).</summary>
+    private static readonly HashSet<string> AccionesAlta = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "INSERT", "INSERTAR", "CREAR", "CREATE", "ALTA", "NUEVO", "AGREGAR"
+    };
+
+    private static bool EsAccionAlta(string? accion)
+        => !string.IsNullOrWhiteSpace(accion) && AccionesAlta.Contains(accion.Trim());
 
     private static string? NullIfWhiteSpace(string? value)
     {

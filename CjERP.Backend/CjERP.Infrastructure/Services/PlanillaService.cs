@@ -559,6 +559,136 @@ namespace CjERP.Infrastructure.Services
                     commandTimeout: 120));
         }
 
+        public async Task<PlanillaCambiarEstadoManualResultDto> CambiarEstadoManualAsync(
+            int correlativo,
+            PlanillaCambiarEstadoManualRequestDto request,
+            int codEmpleado,
+            string usuario,
+            CancellationToken cancellationToken = default)
+        {
+            var idSite = request.IdSite?.Trim() ?? string.Empty;
+            var motivo = request.Observacion?.Trim() ?? string.Empty;
+
+            if (correlativo <= 0 || string.IsNullOrWhiteSpace(idSite))
+            {
+                throw new InvalidOperationException("El correlativo y el IdSite del registro son obligatorios.");
+            }
+
+            if (motivo.Length == 0)
+            {
+                throw new InvalidOperationException("Debe ingresar el motivo del cambio de estado.");
+            }
+
+            if (codEmpleado <= 0)
+            {
+                throw new InvalidOperationException("No se pudo identificar el código de empleado del usuario.");
+            }
+
+            await using var connection = _sqlCommandFactory.CreateConnection();
+
+            // Permiso: Constante PERMISO_ESTADO, ValorIni = código de empleado.
+            var permitidos = await ListarConstanteCampoAsync(connection, "PERMISO_ESTADO", cancellationToken);
+            var autorizado = permitidos.Any(fila =>
+                string.Equals(ValorConstante(fila, "ValorIni"), codEmpleado.ToString(CultureInfo.InvariantCulture), StringComparison.OrdinalIgnoreCase));
+            if (!autorizado)
+            {
+                throw new InvalidOperationException("No tiene permiso para cambiar el estado de los recibos.");
+            }
+
+            // El estado destino debe existir en Constante 'estado' (Correlativo = código del estado).
+            var estados = await ListarConstanteCampoAsync(connection, "estado", cancellationToken);
+            var estadoValido = estados.Any(fila =>
+                int.TryParse(ValorConstante(fila, "Correlativo"), NumberStyles.Integer, CultureInfo.InvariantCulture, out var codigo)
+                && codigo == request.NuevoEstado);
+            if (!estadoValido)
+            {
+                throw new InvalidOperationException("El estado seleccionado no es válido.");
+            }
+
+            var parameters = new DynamicParameters();
+            parameters.Add("@Correlativo", correlativo, DbType.Int32);
+            parameters.Add("@IdSite", idSite, DbType.String);
+            parameters.Add("@NuevoEstado", request.NuevoEstado, DbType.Int32);
+            parameters.Add("@Observacion", motivo, DbType.String);
+            parameters.Add("@Usuario", ResolveUsuarioAccion(usuario), DbType.String);
+
+            PlanillaCambiarEstadoManualResultDto? resultado;
+            try
+            {
+                resultado = await connection.QuerySingleOrDefaultAsync<PlanillaCambiarEstadoManualResultDto>(
+                    _sqlCommandFactory.Create(
+                        "dbo.sp_Planilla_CambiarEstadoManual",
+                        parameters,
+                        CommandType.StoredProcedure,
+                        cancellationToken,
+                        commandTimeout: 60));
+            }
+            catch (SqlException ex) when (ex.Number is >= 50000 and < 51000)
+            {
+                // Errores de negocio del SP (THROW 500xx): se devuelven tal cual al usuario.
+                throw new InvalidOperationException(ex.Message, ex);
+            }
+
+            if (resultado is null)
+            {
+                throw new InvalidOperationException("No se pudo cambiar el estado del registro.");
+            }
+
+            try
+            {
+                await _auditoriaCambiosService.RegistrarAsync(
+                    new AuditoriaCambioDto
+                    {
+                        Modulo = "Planilla",
+                        Entidad = "Planilla",
+                        IdRegistro = correlativo.ToString(CultureInfo.InvariantCulture),
+                        Accion = "UPDATE",
+                        Seccion = "Cambio manual de estado",
+                        Campo = "Estado",
+                        ValorAnterior = resultado.EstadoAnterior.ToString(CultureInfo.InvariantCulture),
+                        ValorNuevo = resultado.EstadoNuevo.ToString(CultureInfo.InvariantCulture),
+                        UsuarioAccion = ResolveUsuarioAccion(usuario),
+                        Observacion = $"Cambio manual de estado. Motivo: {motivo}"
+                    },
+                    cancellationToken);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                // El cambio ya está confirmado y registrado en MovEstadosPagos; la auditoría no lo revierte.
+                _logger.LogWarning(ex, "No se pudo registrar la auditoría del cambio manual de estado del correlativo {Correlativo}", correlativo);
+            }
+
+            return resultado;
+        }
+
+        private async Task<List<IDictionary<string, object>>> ListarConstanteCampoAsync(
+            SqlConnection connection,
+            string campo,
+            CancellationToken cancellationToken)
+        {
+            var rows = await connection.QueryAsync(
+                _sqlCommandFactory.Create(
+                    "sp_Constante_ListarPorCampo",
+                    new { Campo = campo },
+                    CommandType.StoredProcedure,
+                    cancellationToken));
+
+            return rows.Select(row => (IDictionary<string, object>)row).ToList();
+        }
+
+        private static string ValorConstante(IDictionary<string, object> fila, string columna)
+        {
+            foreach (var entrada in fila)
+            {
+                if (string.Equals(entrada.Key, columna, StringComparison.OrdinalIgnoreCase))
+                {
+                    return Convert.ToString(entrada.Value, CultureInfo.InvariantCulture)?.Trim() ?? string.Empty;
+                }
+            }
+
+            return string.Empty;
+        }
+
         public async Task<PlanillaProcesarAprobacionMasivaResponseDto> ProcesarAprobacionMasivaAsync(
             IReadOnlyList<PlanillaProcesarAprobacionItemDto> registros,
             int codEstado,

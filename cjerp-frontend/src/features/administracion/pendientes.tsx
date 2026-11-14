@@ -6,13 +6,16 @@ import CrudToolbar, {
 import {
   actualizarEmpleadoPendiente,
   buscarEmpleadoPendiente,
+  descargarPdfEmpleadoPendiente,
   insertarEmpleadoPendiente,
   subirAdjuntoEmpleadoPendiente,
 } from "../../api/empleadoPendienteService";
+import DataGridPro from "../../components/datagrid/DataGridPro";
+import type { GridColumn } from "../../components/datagrid/types";
 import { listarSolicitanteOptions } from "../../api/solicitanteService";
 import { getAuthUser } from "../../utils/authStorage";
 import { getHttpErrorMessage } from "../../utils/httpError";
-import { buildSharePointUrl } from "../../utils/sharepoint";
+import { abrirAdjunto, urlVisibleAdjunto } from "../../utils/adjuntos";
 import type { ConstanteOption } from "../../models/constante";
 import type {
   EmpleadoPendienteBuscarRequest,
@@ -20,16 +23,6 @@ import type {
   EmpleadoPendienteInsertRequest,
   EmpleadoPendienteUpdateRequest,
 } from "../../models/empleadoPendiente";
-
-type ColumnFilterDropdownProps = {
-  header: { key: string; label: string };
-  filtroColumnaMenuRef: React.RefObject<HTMLDivElement | null>;
-  filtrosColumnas: Record<string, string[]>;
-  setFiltrosColumnas: React.Dispatch<React.SetStateAction<Record<string, string[]>>>;
-  opcionesFiltroPorColumna: Record<string, string[]>;
-  filtroBusqueda: string;
-  setFiltroBusqueda: (value: string) => void;
-};
 
 type HeaderFilterState = {
   idPendiente: string;
@@ -53,17 +46,20 @@ type PendienteDraft = {
   ruta: string;
 };
 
-const columns = [
-  { key: "acciones", label: "Acciones", width: "50px" },
-  { key: "idPendiente", label: "Id", width: "30px" },
-  { key: "nombreEmpleado", label: "Empleado", width: "100px" },
-  { key: "fechaInicio", label: "Fecha inicio", width: "60px" },
-  { key: "fechaEstimacionTermino", label: "F.est. término", width: "60px" },
-  { key: "estado", label: "Estado", width: "40px" },
-  { key: "responsable", label: "Responsable", width: "100px" },
-  { key: "comentario", label: "Comentario", width: "260px" },
-  { key: "ruta", label: "Ruta", width: "200px" },
-] as const;
+// Estado "rechazado" en EmpleadoPendiente.IdEstado (Constante ESTADO_PENDIENTE; PV confirmar correlativo 5).
+const ID_ESTADO_RECHAZADO = 5;
+const ROW_RECHAZADO_BG = "#FEE2E2";
+// Estado 4 = terminado: no corre demora.
+const ID_ESTADO_TERMINADO = 4;
+
+/** Días de demora = hoy (America/Lima) - fecha estimada de término. 0 si no está vencido; null si estado 4 o sin fecha. */
+function calcularDiasDemora(row: EmpleadoPendienteDto): number | null {
+  if (row.idEstado === ID_ESTADO_TERMINADO || !row.fechaEstimacionTermino) return null;
+  const hoyLima = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Lima" }).format(new Date());
+  const fin = String(row.fechaEstimacionTermino).slice(0, 10);
+  const dias = Math.round((Date.parse(`${hoyLima}T00:00:00Z`) - Date.parse(`${fin}T00:00:00Z`)) / 86400000);
+  return Number.isFinite(dias) ? Math.max(dias, 0) : null;
+}
 
 const today = new Date().toISOString().slice(0, 10);
 
@@ -89,98 +85,9 @@ const createEmptyDraft = (): PendienteDraft => ({
   ruta: "",
 });
 
-function ColumnFilterDropdown({
-  header,
-  filtroColumnaMenuRef,
-  filtrosColumnas,
-  setFiltrosColumnas,
-  opcionesFiltroPorColumna,
-  filtroBusqueda,
-  setFiltroBusqueda,
-}: ColumnFilterDropdownProps) {
-  const opciones = (opcionesFiltroPorColumna[header.key] ?? []).filter((opcion) =>
-    (opcion || "(Vacio)").toLowerCase().includes(filtroBusqueda.toLowerCase())
-  );
-
-  return (
-    <div
-      ref={filtroColumnaMenuRef}
-      onClick={(event) => event.stopPropagation()}
-      style={styles.columnFilter}
-    >
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-        <strong style={{ fontSize: 11, color: "#17143A" }}>{header.label}</strong>
-        <button
-          type="button"
-          onClick={() => setFiltrosColumnas((prev) => ({ ...prev, [header.key]: [] }))}
-          style={styles.clearInlineButton}
-        >
-          Limpiar
-        </button>
-      </div>
-      <input
-        type="text"
-        placeholder="Buscar opcion..."
-        value={filtroBusqueda}
-        onChange={(event) => setFiltroBusqueda(event.target.value)}
-        style={styles.columnFilterInput}
-      />
-      <label style={styles.columnFilterItem}>
-        <input
-          type="checkbox"
-          checked={(filtrosColumnas[header.key] ?? []).length === 0}
-          onChange={() => setFiltrosColumnas((prev) => ({ ...prev, [header.key]: [] }))}
-        />
-        <span>(Todas)</span>
-      </label>
-      <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-        {opciones.map((opcion) => {
-          const seleccionadas = filtrosColumnas[header.key] ?? [];
-          const checked = seleccionadas.includes(opcion);
-          return (
-            <label key={`${header.key}-${opcion}`} style={styles.columnFilterItem}>
-              <input
-                type="checkbox"
-                checked={checked}
-                onChange={() =>
-                  setFiltrosColumnas((prev) => {
-                    const actuales = prev[header.key] ?? [];
-                    return {
-                      ...prev,
-                      [header.key]: checked
-                        ? actuales.filter((item) => item !== opcion)
-                        : [...actuales, opcion],
-                    };
-                  })
-                }
-              />
-              <span>{opcion || "(Vacio)"}</span>
-            </label>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
 function toNumber(value: string | number | null | undefined) {
   const numeric = Number(value);
   return Number.isFinite(numeric) ? numeric : 0;
-}
-
-function formatDate(value?: string | null) {
-  if (!value) return "";
-  const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleDateString("es-PE");
-}
-
-function normalizeColumnValue(value: unknown) {
-  return String(value ?? "").trim();
-}
-
-function matchesColumnFilterValue(value: unknown, selectedValues: string[]) {
-  if (!selectedValues.length) return true;
-  return selectedValues.includes(normalizeColumnValue(value));
 }
 
 function normalizeOptionValue(option: ConstanteOption): string {
@@ -230,7 +137,7 @@ function buildDraftFromRow(item: EmpleadoPendienteDto): PendienteDraft {
 }
 
 function getRutaVisualizacion(ruta?: string | null) {
-  return buildSharePointUrl(ruta);
+  return urlVisibleAdjunto(ruta);
 }
 
 export default function PendientesPage() {
@@ -257,28 +164,25 @@ export default function PendientesPage() {
   const [busqueda, setBusqueda] = useState("");
   const [panelOpen, setPanelOpen] = useState(false);
   const [isEditMode, setIsEditMode] = useState(false);
-  const [filtrosColumnas, setFiltrosColumnas] = useState<Record<string, string[]>>({});
-  const [columnaFiltroAbierta, setColumnaFiltroAbierta] = useState<string | null>(null);
-  const [filtroBusqueda, setFiltroBusqueda] = useState("");
-  const filtroColumnaMenuRef = useRef<HTMLDivElement>(null);
   const archivoRutaInputRef = useRef<HTMLInputElement | null>(null);
   const [rutaUploadLoading, setRutaUploadLoading] = useState(false);
   const [rutaUploadError, setRutaUploadError] = useState<string | null>(null);
+  const [responsableNombre, setResponsableNombre] = useState("");
+  const [pdfLoading, setPdfLoading] = useState(false);
+  const [rechazoModal, setRechazoModal] = useState<{
+    row: EmpleadoPendienteDto;
+    motivo: string;
+    error: string;
+  } | null>(null);
 
   useEffect(() => {
     const loadOptions = async () => {
       try {
-        const empleadosFiltrados = await listarSolicitanteOptions({
-          idCargo: userCargoId > 0 ? userCargoId : null,
-          idEmpleado: userId > 0 ? userId : null,
+        // Responsable/Empleado: todo el catálogo de solicitantes (sp_ListarSolicitante), sin filtrar por el usuario.
+        const empleados = await listarSolicitanteOptions({
+          idCargo: null,
+          idEmpleado: null,
         });
-        const empleados =
-          empleadosFiltrados.length > 0
-            ? empleadosFiltrados
-            : await listarSolicitanteOptions({
-                idCargo: null,
-                idEmpleado: null,
-              });
 
         setEmpleadoOptions(empleados);
       } catch (err) {
@@ -289,71 +193,25 @@ export default function PendientesPage() {
     void loadOptions();
   }, [userCargoId, userId]);
 
-  useEffect(() => {
-    if (!columnaFiltroAbierta) return;
-
-    const handlePointerDown = (event: MouseEvent) => {
-      if (filtroColumnaMenuRef.current && !filtroColumnaMenuRef.current.contains(event.target as Node)) {
-        setColumnaFiltroAbierta(null);
-      }
-    };
-
-    document.addEventListener("mousedown", handlePointerDown);
-    return () => document.removeEventListener("mousedown", handlePointerDown);
-  }, [columnaFiltroAbierta]);
-
   const searchFields = useMemo<CrudToolbarSearchField<EmpleadoPendienteDto>[]>(
     () => [
       { key: "idPendiente", label: "Id", getValue: (item) => item.idPendiente },
       { key: "nombreEmpleado", label: "Empleado", getValue: (item) => item.nombreEmpleado },
       { key: "estado", label: "Estado", getValue: (item) => item.estado },
       { key: "responsable", label: "Responsable", getValue: (item) => item.responsable },
+      { key: "correoEmpleado", label: "Correo empleado", getValue: (item) => item.correoEmpleado },
+      { key: "correoResponsable", label: "Correo responsable", getValue: (item) => item.correoResponsable },
       { key: "comentario", label: "Comentario", getValue: (item) => item.comentario },
+      { key: "observacion", label: "Observación", getValue: (item) => item.observacion },
       { key: "ruta", label: "Ruta", getValue: (item) => item.ruta },
     ],
     []
   );
 
-  const getColumnValue = (item: EmpleadoPendienteDto, key: string) => {
-    switch (key) {
-      case "fechaInicio":
-        return formatDate(item.fechaInicio);
-      case "fechaEstimacionTermino":
-        return formatDate(item.fechaEstimacionTermino);
-      case "fechaRealTermino":
-        return formatDate(item.fechaRealTermino);
-      case "fechaCreacion":
-        return formatDate(item.fechaCreacion);
-      default:
-        return String((item as Record<string, unknown>)[key] ?? "");
-    }
-  };
-
   const filteredRows = useMemo(
-    () =>
-      rows
-        .filter((item) => matchesCrudToolbarSearch(item, busqueda, searchFields))
-        .filter((item) =>
-          columns
-            .filter((column) => column.key !== "acciones")
-            .every((column) =>
-              matchesColumnFilterValue(getColumnValue(item, column.key), filtrosColumnas[column.key] ?? [])
-            )
-        ),
-    [busqueda, filtrosColumnas, rows, searchFields]
+    () => rows.filter((item) => matchesCrudToolbarSearch(item, busqueda, searchFields)),
+    [busqueda, rows, searchFields]
   );
-
-  const opcionesFiltroPorColumna = useMemo(() => {
-    const result: Record<string, string[]> = {};
-    columns
-      .filter((column) => column.key !== "acciones")
-      .forEach((column) => {
-        result[column.key] = Array.from(
-          new Set(rows.map((item) => normalizeColumnValue(getColumnValue(item, column.key))))
-        ).sort((left, right) => left.localeCompare(right, "es", { sensitivity: "base" }));
-      });
-    return result;
-  }, [rows]);
 
   const loadData = async (request?: Partial<EmpleadoPendienteBuscarRequest>) => {
     setLoading(true);
@@ -407,6 +265,7 @@ export default function PendientesPage() {
 
   const handleEditar = (row: EmpleadoPendienteDto) => {
     setDraft(buildDraftFromRow(row));
+    setResponsableNombre(row.responsable || "");
     setIsEditMode(true);
     setRutaUploadLoading(false);
     setRutaUploadError(null);
@@ -528,6 +387,175 @@ export default function PendientesPage() {
     }
   };
 
+  const abrirPdf = async () => {
+    setPdfLoading(true);
+    setError("");
+    try {
+      const blob = await descargarPdfEmpleadoPendiente();
+      const url = URL.createObjectURL(new Blob([blob], { type: "application/pdf" }));
+      window.open(url, "_blank");
+      window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch (err) {
+      setError(getHttpErrorMessage(err, "No se pudo generar el PDF."));
+    } finally {
+      setPdfLoading(false);
+    }
+  };
+
+  const handleRechazar = (row: EmpleadoPendienteDto) => {
+    setRechazoModal({ row, motivo: "", error: "" });
+  };
+
+  const confirmarRechazo = async () => {
+    if (!rechazoModal) return;
+    const { row, motivo } = rechazoModal;
+
+    const motivoLimpio = motivo.trim();
+    if (!motivoLimpio) {
+      setRechazoModal((prev) => (prev ? { ...prev, error: "Ingrese el motivo del rechazo." } : prev));
+      return;
+    }
+
+    // El motivo se agrega a lo que ya existe en Observación.
+    const observacionActual = row.observacion?.trim() ?? "";
+    const observacionFinal = observacionActual ? `${observacionActual}
+${motivoLimpio}` : motivoLimpio;
+
+    setSaving(true);
+    setError("");
+    setMessage("");
+
+    try {
+      const payload: EmpleadoPendienteUpdateRequest = {
+        idPendiente: row.idPendiente,
+        idEmpleado: row.idEmpleado,
+        fechaInicio: row.fechaInicio ? String(row.fechaInicio).slice(0, 10) : null,
+        fechaEstimacionTermino: row.fechaEstimacionTermino ? String(row.fechaEstimacionTermino).slice(0, 10) : null,
+        fechaRealTermino: row.fechaRealTermino ? String(row.fechaRealTermino).slice(0, 10) : null,
+        idEstado: ID_ESTADO_RECHAZADO,
+        comentario: row.comentario?.trim() || null,
+        observacion: observacionFinal,
+        idResponsable: row.idResponsable ?? null,
+        ruta: row.ruta?.trim() || null,
+        usuarioModificacion: userName,
+      };
+      await actualizarEmpleadoPendiente(payload);
+      setMessage("Pendiente rechazado correctamente.");
+      setRechazoModal(null);
+      await loadData();
+    } catch (err) {
+      setRechazoModal((prev) =>
+        prev ? { ...prev, error: getHttpErrorMessage(err, "No se pudo rechazar el pendiente.") } : prev
+      );
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const gridColumnsBase: GridColumn<EmpleadoPendienteDto>[] = [
+    {
+      dataField: "acciones",
+      caption: "Acciones",
+      width: 150,
+      alignment: "center",
+      fixed: true,
+      allowSorting: false,
+      allowFiltering: false,
+      allowGrouping: false,
+      allowHeaderFilter: false,
+      allowSearch: false,
+      allowResizing: false,
+      calculateCellValue: () => "",
+      cellRender: (_value, row) => {
+        const rechazado = row.idEstado === ID_ESTADO_RECHAZADO;
+        const disabledStyle: React.CSSProperties = rechazado ? { opacity: 0.45, cursor: "not-allowed" } : {};
+        return (
+          <div style={{ display: "flex", flexWrap: "nowrap", alignItems: "center", justifyContent: "center", gap: 6 }}>
+            <button
+              type="button"
+              style={{ ...styles.smallActionButton, ...disabledStyle }}
+              disabled={rechazado}
+              onClick={(event) => {
+                event.stopPropagation();
+                handleEditar(row);
+              }}
+            >
+              Editar
+            </button>
+            <button
+              type="button"
+              style={{
+                ...styles.smallActionButton,
+                borderColor: "#FECACA",
+                background: "#FEF2F2",
+                color: "#B91C1C",
+                ...disabledStyle,
+              }}
+              disabled={saving || rechazado}
+              onClick={(event) => {
+                event.stopPropagation();
+                handleRechazar(row);
+              }}
+            >
+              Rechazar
+            </button>
+          </div>
+        );
+      },
+    },
+    { dataField: "idPendiente", caption: "Id", dataType: "number", width: 70 },
+    { dataField: "nombreEmpleado", caption: "Empleado", width: 200 },
+    { dataField: "correoEmpleado", caption: "Correo empleado", width: 200 },
+    { dataField: "fechaInicio", caption: "Fecha inicio", dataType: "date", width: 110 },
+    { dataField: "fechaEstimacionTermino", caption: "F.est. término", dataType: "date", width: 110 },
+    {
+      dataField: "diasDemora",
+      caption: "Días demora",
+      dataType: "number",
+      placeAfter: "fechaEstimacionTermino",
+      width: 100,
+      alignment: "center",
+      calculateCellValue: (row) => calcularDiasDemora(row),
+      cellRender: (value) => (value == null ? "" : String(value)),
+      cellStyle: (value) =>
+        typeof value === "number" && value > 0 ? { color: "#B91C1C", fontWeight: 700 } : undefined,
+    },
+    { dataField: "estado", caption: "Estado", width: 110 },
+    { dataField: "responsable", caption: "Responsable", width: 200 },
+    { dataField: "correoResponsable", caption: "Correo responsable", width: 200 },
+    { dataField: "comentario", caption: "Comentario", width: 260 },
+    { dataField: "observacion", caption: "Observación", width: 260 },
+    {
+      dataField: "ruta",
+      caption: "Ruta",
+      width: 220,
+      cellRender: (value, row) =>
+        row.ruta ? (
+          <a
+            href={row.ruta}
+            style={{ color: "#1D4ED8", textDecoration: "underline", cursor: "pointer" }}
+            title={row.ruta}
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              void abrirAdjunto(row.ruta).catch(() => window.alert("No se pudo abrir el archivo adjunto."));
+            }}
+          >
+            {String(value ?? "")}
+          </a>
+        ) : null,
+    },
+  ];
+
+  // Fila rechazada: se resalta cada celda (las columnas fijas pintan su propio fondo).
+  const gridColumns: GridColumn<EmpleadoPendienteDto>[] = gridColumnsBase.map((column) => ({
+    ...column,
+    cellStyle: (value, row) => ({
+      ...(row.idEstado === ID_ESTADO_RECHAZADO ? { background: ROW_RECHAZADO_BG } : {}),
+      ...(column.cellStyle?.(value, row) ?? {}),
+    }),
+  }));
+
   return (
     <div style={styles.page}>
       <CrudToolbar
@@ -537,10 +565,17 @@ export default function PendientesPage() {
         buttons={[
           {
             key: "actualizar",
-            label: loading ? "Actualizando..." : "Refrescar",
+            label: loading ? "Actualizando..." : "Actualizar",
             onClick: () => void loadData(),
             variant: "secondary",
             disabled: loading,
+          },
+          {
+            key: "pdf",
+            label: pdfLoading ? "Generando PDF..." : "PDF",
+            onClick: () => void abrirPdf(),
+            variant: "secondary",
+            disabled: pdfLoading,
           },
           { key: "nuevo", label: "Nuevo", onClick: handleNuevo },
         ]}
@@ -569,88 +604,57 @@ export default function PendientesPage() {
           </div>
         </div>
 
-        <div style={{ ...styles.tableWrap, ...styles.gridTableWrap }}>
-          <table style={styles.table}>
-            <colgroup>
-              {columns.map((column) => (
-                <col key={`header-${column.key}`} style={{ width: column.width }} />
-              ))}
-            </colgroup>
-            <thead>
-              <tr>
-                {columns.map((header) => (
-                  <th key={header.key} style={{ ...styles.th, width: header.width }}>
-                    <div style={styles.thContent}>
-                      <span>{header.label}</span>
-                      {header.key !== "acciones" ? (
-                        <button
-                          type="button"
-                          style={styles.filterButton}
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            setColumnaFiltroAbierta((prev) => (prev === header.key ? null : header.key));
-                            setFiltroBusqueda("");
-                          }}
-                        >
-                          Filtrar
-                        </button>
-                      ) : null}
-                    </div>
-                    {columnaFiltroAbierta === header.key ? (
-                      <ColumnFilterDropdown
-                        header={header}
-                        filtroColumnaMenuRef={filtroColumnaMenuRef}
-                        filtrosColumnas={filtrosColumnas}
-                        setFiltrosColumnas={setFiltrosColumnas}
-                        opcionesFiltroPorColumna={opcionesFiltroPorColumna}
-                        filtroBusqueda={filtroBusqueda}
-                        setFiltroBusqueda={setFiltroBusqueda}
-                      />
-                    ) : null}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-          </table>
-          <div style={styles.tableBodyScroll}>
-            <table style={styles.table}>
-              <colgroup>
-                {columns.map((column) => (
-                  <col key={`body-${column.key}`} style={{ width: column.width }} />
-                ))}
-              </colgroup>
-              <tbody>
-                {loading ? (
-                  <tr>
-                    <td colSpan={columns.length} style={styles.emptyCell}>Cargando pendientes...</td>
-                  </tr>
-                ) : filteredRows.length === 0 ? (
-                  <tr>
-                    <td colSpan={columns.length} style={styles.emptyCell}>No hay datos para mostrar.</td>
-                  </tr>
-                ) : (
-                  filteredRows.map((row) => (
-                    <tr key={row.idPendiente} style={styles.tr}>
-                      <td style={styles.td}>
-                        <button type="button" style={styles.smallActionButton} onClick={() => handleEditar(row)}>
-                          Editar
-                        </button>
-                      </td>
-                      {columns
-                        .filter((item) => item.key !== "acciones")
-                        .map((column) => (
-                          <td key={`${row.idPendiente}-${column.key}`} style={styles.td}>
-                            {getColumnValue(row, column.key)}
-                          </td>
-                        ))}
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
+        <DataGridPro<EmpleadoPendienteDto>
+          dataSource={filteredRows}
+          columns={gridColumns}
+          keyExpr="idPendiente"
+          rowStyle={(row) => (row.idEstado === ID_ESTADO_RECHAZADO ? { background: ROW_RECHAZADO_BG } : undefined)}
+          height="65vh"
+          loading={loading}
+          noDataText="No hay datos para mostrar."
+          stateStoringKey="pendientes"
+          showSearchPanel={false}
+          allowExport
+          exportFileName="pendientes"
+          autoExpandAll={false}
+          rowAlternation={false}
+          rowPadding="4px 8px"
+          paging={{ pageSize: 50, pageSizes: [20, 50, 100, 250] }}
+        />
       </section>
+
+      {rechazoModal ? (
+        <div style={{ ...styles.sidePanelOverlay, justifyContent: "center", alignItems: "center" }}>
+          <section style={{ ...styles.card, width: 480, maxWidth: "92%", display: "flex", flexDirection: "column", gap: 12 }}>
+            <h3 style={styles.subTitle}>Rechazar pendiente #{rechazoModal.row.idPendiente}</h3>
+            {rechazoModal.error ? <div style={styles.errorBanner}>{rechazoModal.error}</div> : null}
+            <Field label="Comentario">
+              <textarea
+                value={rechazoModal.row.comentario || ""}
+                readOnly
+                style={{ ...styles.textarea, background: "#F8FAFC", color: "#475569" }}
+              />
+            </Field>
+            <Field label="Motivo">
+              <textarea
+                value={rechazoModal.motivo}
+                onChange={(event) => setRechazoModal((prev) => (prev ? { ...prev, motivo: event.target.value, error: "" } : prev))}
+                style={styles.textarea}
+                disabled={saving}
+                autoFocus
+              />
+            </Field>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+              <button type="button" style={styles.secondaryButton} onClick={() => setRechazoModal(null)} disabled={saving}>
+                Cancelar
+              </button>
+              <button type="button" style={styles.primaryButton} onClick={() => void confirmarRechazo()} disabled={saving}>
+                {saving ? "Procesando..." : "Aceptar"}
+              </button>
+            </div>
+          </section>
+        </div>
+      ) : null}
 
       {panelOpen ? (
         <div style={styles.sidePanelOverlay}>
@@ -670,7 +674,7 @@ export default function PendientesPage() {
                   Cerrar
                 </button>
                 <button type="button" style={styles.primaryButton} onClick={() => void handleGuardar()} disabled={saving}>
-                  {isEditMode ? (saving ? "Actualizando..." : "Refrescar") : (saving ? "Guardando..." : "Guardar")}
+                  {isEditMode ? (saving ? "Actualizando..." : "Actualizar") : (saving ? "Guardando..." : "Guardar")}
                 </button>
               </div>
             </div>
@@ -697,19 +701,11 @@ export default function PendientesPage() {
                   <SolicitanteTypeahead
                     options={empleadoOptions}
                     selectedValue={draft.idResponsable}
+                    fallbackLabel={isEditMode ? responsableNombre : ""}
                     onSelect={(value) => setDraft((prev) => ({ ...prev, idResponsable: value }))}
                     placeholder="Seleccione..."
                   />
                 </Field>
-                {isEditMode ? (
-                  <Field label="Id estado">
-                    <input
-                      value={draft.idEstado}
-                      onChange={(event) => setDraft((prev) => ({ ...prev, idEstado: event.target.value }))}
-                      style={styles.input}
-                    />
-                  </Field>
-                ) : null}
                 <Field label="Fecha inicio">
                   <input
                     type="date"
@@ -735,6 +731,16 @@ export default function PendientesPage() {
                   style={styles.textarea}
                 />
               </Field>
+
+              {isEditMode ? (
+                <Field label="Observación">
+                  <textarea
+                    value={draft.observacion}
+                    onChange={(event) => setDraft((prev) => ({ ...prev, observacion: event.target.value }))}
+                    style={styles.textarea}
+                  />
+                </Field>
+              ) : null}
 
               <Field label="Ruta">
                 <div style={styles.uploadFieldWrap}>
@@ -767,7 +773,7 @@ export default function PendientesPage() {
                       title={rutaDisplayPath || "Sin archivo cargado"}
                       onClick={() => {
                         if (rutaDisplayPath) {
-                          window.open(rutaDisplayPath, "_blank", "noopener,noreferrer");
+                          void abrirAdjunto(draft.ruta).catch(() => window.alert("No se pudo abrir el archivo adjunto."));
                         }
                       }}
                     >
@@ -816,11 +822,13 @@ function Label({ children }: { children: React.ReactNode }) {
 const SolicitanteTypeahead = React.memo(function SolicitanteTypeahead({
   options,
   selectedValue,
+  fallbackLabel,
   onSelect,
   placeholder,
 }: {
   options: ConstanteOption[];
   selectedValue: string;
+  fallbackLabel?: string;
   onSelect: (value: string) => void;
   placeholder?: string;
 }) {
@@ -834,8 +842,8 @@ const SolicitanteTypeahead = React.memo(function SolicitanteTypeahead({
   );
 
   useEffect(() => {
-    setInputValue(selectedOption?.label ?? "");
-  }, [selectedOption]);
+    setInputValue(selectedOption?.label ?? (selectedValue ? fallbackLabel ?? "" : ""));
+  }, [selectedOption, selectedValue, fallbackLabel]);
 
   const filteredOptions = useMemo(() => {
     if (inputValue.trim() === "") {

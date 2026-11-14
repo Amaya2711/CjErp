@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { abrirAdjunto } from "../../../utils/adjuntos";
 import {
   matchesCrudToolbarSearch,
   type CrudToolbarSearchField,
@@ -17,7 +18,6 @@ import {
   rechazarDetalleOrdenCompra,
   buscarRecibosAsociadosOrdenCompra,
   buscarRecibosSinAsociarOrdenCompra,
-  descargarArchivoOrdenCompra,
   descargarOrdenCompraPdf,
   generarPagoNuevoOrdenCompra,
   generarPagoNuevoMasivoOrdenCompra,
@@ -5800,10 +5800,10 @@ function ArchivoButton({ codigo, label }: { codigo?: string | null; label: strin
         if (!codigoLimpio) return;
         setLoading(true);
         try {
-          const blob = await descargarArchivoOrdenCompra(codigoLimpio);
-          const url = URL.createObjectURL(blob);
-          window.open(url, "_blank", "noopener,noreferrer");
-          setTimeout(() => URL.revokeObjectURL(url), 60_000);
+          // Primero SharePoint (ruta); si es un código numérico, gestor del sistema antiguo.
+          await abrirAdjunto(codigoLimpio);
+        } catch {
+          window.alert("No se pudo abrir el archivo adjunto.");
         } finally {
           setLoading(false);
         }

@@ -366,6 +366,7 @@ builder.Services.AddSingleton(builder.Configuration.GetSection("IaChat:ScopeEnfo
 builder.Services.AddHttpClient<ISharePointCommercialUploadService, SharePointCommercialUploadService>();
 builder.Services.AddHttpClient<ISharePointExcelTableService, SharePointCommercialUploadService>();
 builder.Services.AddHttpClient<ISharePointListSyncService, SharePointListSyncService>();
+builder.Services.AddHttpClient<IGestorArchivoLegacyService, GestorArchivoLegacyService>();
 builder.Services.AddHttpClient<IWupAuthService, WupAuthService>((serviceProvider, client) =>
 {
     var settings = serviceProvider.GetRequiredService<Microsoft.Extensions.Options.IOptions<WupSettings>>().Value;

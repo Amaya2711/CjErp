@@ -32,6 +32,8 @@ import type { ValoresGastoRequest, ValoresGastoResponse } from "../../models/val
 import { getAuthUser } from "../../utils/authStorage";
 import { compressImageForUpload } from "../../utils/imageCompression";
 import { SHAREPOINT_BASE_URL } from "../../utils/sharepoint";
+import { abrirAdjunto, esCodigoLegacy } from "../../utils/adjuntos";
+import { useAdjuntoLegacyPreview } from "../../hooks/useAdjuntoLegacyPreview";
 import "../finanzas/tesoreria/gastosaprobar.css";
 
 type GastoDto = {
@@ -2216,10 +2218,18 @@ export default function RecursosHumanosVacacionesPage() {
   const aplicaIgv = isFacturaComprobante(comprobanteOptions, form.comprobante);
   const igvAmount = roundToTwoDecimals(aplicaIgv ? subtotalAmount * IGV_RATE : 0);
   const totalAmount = roundToTwoDecimals(subtotalAmount + igvAmount);
-  const facturaDisplayPath =
-    modo === "editar" && form.facturaPath && !form.facturaPath.startsWith("http")
+  // Regla de adjuntos: primero SharePoint; un código numérico es del sistema antiguo (elnk.uno).
+  const facturaRaw = getFacturaDisplayPath(form.facturaPath, form.facturaUrl);
+  const facturaEsLegacy = esCodigoLegacy(facturaRaw);
+  const facturaDisplayPath = facturaEsLegacy
+    ? facturaRaw
+    : modo === "editar" && form.facturaPath && !form.facturaPath.startsWith("http")
       ? SHAREPOINT_BASE_URL + form.facturaPath.replace(/^\/+/, "")
-      : getFacturaDisplayPath(form.facturaPath, form.facturaUrl);
+      : facturaRaw;
+  const facturaLegacy = useAdjuntoLegacyPreview(facturaRaw, facturaEsLegacy && showFacturaViewer);
+  const facturaVisorSrc = facturaEsLegacy ? facturaLegacy.url : facturaDisplayPath;
+  const facturaVisorEsImagen = facturaEsLegacy ? facturaLegacy.tipo === "image" : /\.(jpg|jpeg|png|gif|webp)$/i.test(facturaDisplayPath);
+  const facturaVisorEsPdf = facturaEsLegacy ? facturaLegacy.tipo === "pdf" : /\.pdf$/i.test(facturaDisplayPath);
 
   const subirFactura = async (file: File) => {
     const formData = new FormData();
@@ -4076,9 +4086,10 @@ export default function RecursosHumanosVacacionesPage() {
               {/* Enlace para visualizar la factura solo si hay ruta y NO es modo nuevo ni editar */}
               {modo !== "nuevo" && modo !== "editar" && (form.facturaPath || form.facturaUrl) && (
                 <a
-                  href={facturaDisplayPath}
+                  href={facturaEsLegacy ? "#" : facturaDisplayPath}
                   target="_blank"
                   rel="noopener noreferrer"
+                  onClick={facturaEsLegacy ? (e) => { e.preventDefault(); void abrirAdjunto(facturaRaw).catch(() => window.alert("No se pudo recuperar el documento desde el sistema antiguo.")); } : undefined}
                   style={{
                     display: "inline-block",
                     marginBottom: 10,
@@ -5161,9 +5172,13 @@ export default function RecursosHumanosVacacionesPage() {
                               >
                                 Ã—
                               </button>
-                              {facturaDisplayPath.match(/\.(jpg|jpeg|png|gif|webp)$/i) ? (
+                              {facturaEsLegacy && facturaLegacy.loading ? (
+                                <div style={{ color: "#475569", fontSize: 14 }}>Cargando documento...</div>
+                              ) : facturaEsLegacy && facturaLegacy.error ? (
+                                <div style={{ color: "#DC2626", fontWeight: 600, fontSize: 14 }}>{facturaLegacy.error}</div>
+                              ) : facturaVisorEsImagen ? (
                                 <img
-                                  src={facturaDisplayPath}
+                                  src={facturaVisorSrc}
                                   alt="Factura adjunta"
                                   style={{
                                     maxWidth: "80vw",
@@ -5172,9 +5187,9 @@ export default function RecursosHumanosVacacionesPage() {
                                     boxShadow: "0 2px 12px rgba(0,0,0,0.10)",
                                   }}
                                 />
-                              ) : facturaDisplayPath.match(/\.(pdf)$/i) ? (
+                              ) : facturaVisorEsPdf ? (
                                 <iframe
-                                  src={facturaDisplayPath}
+                                  src={facturaVisorSrc}
                                   title="Factura PDF"
                                   style={{
                                     width: "80vw",

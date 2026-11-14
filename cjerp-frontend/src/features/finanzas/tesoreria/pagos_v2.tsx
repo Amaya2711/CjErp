@@ -24,8 +24,10 @@ import AppPage from "../../../components/base/AppPage";
 import {
   buildPlanillaConsultaEstadosRequest,
   aprobarPlanillaMasivaPorBloques,
+  cambiarEstadoManualPlanilla,
   consultarPlanillaEstados,
 } from "../../../api/planillaConsultaService";
+import { getConstantesPorCampo } from "../../../api/constantesService";
 import type {
   AprobacionResultadoDto,
   PlanillaConsultaEstadosRequest,
@@ -142,6 +144,15 @@ const COLORES_ESTADO_OC: Record<string, string> = {
 
 type RechazoModalState = {
   rows: PagoRow[];
+  observacion: string;
+  submitting: boolean;
+  error: string | null;
+};
+
+type CambioEstadoModalState = {
+  // Una fila (cambio individual) o varias (cambio masivo desde "Estado modificar").
+  rows: PagoRow[];
+  nuevoEstado: string;
   observacion: string;
   submitting: boolean;
   error: string | null;
@@ -1001,6 +1012,8 @@ const CAMPOS_TOTALES_DIFERIDOS = [
 ] as const;
 
 const TOTALES_DIFERIDOS_LOTE = 7500;
+// Hasta esta cantidad de filas se espera la respuesta de totales antes de pintar (una sola carga visible).
+const TOTALES_UNA_CARGA_MAX_FILAS = 100;
 
 function claveTotalesDiferidos(correlativo: string, idSite: string) {
   return `${correlativo.trim()}|${idSite.trim()}`;
@@ -1016,9 +1029,15 @@ function aplicarTotalesDiferidos(rows: PagoRow[], totales: Map<string, Record<st
 
     const raw: Record<string, unknown> = { ...row.planillaRow };
     for (const campo of CAMPOS_TOTALES_DIFERIDOS) {
-      if (campo in totalesFila) {
-        raw[campo] = totalesFila[campo];
+      // La API puede devolver los nombres con otra capitalización (camelCase): se busca sin distinguir
+      // mayúsculas y se descartan las variantes del valor provisional de la carga ligera.
+      const destino = normalizeRecordKey(campo);
+      const claveTotales = Object.keys(totalesFila).find((clave) => normalizeRecordKey(clave) === destino);
+      if (claveTotales === undefined) continue;
+      for (const clave of Object.keys(raw)) {
+        if (clave !== campo && normalizeRecordKey(clave) === destino) delete raw[clave];
       }
+      raw[campo] = totalesFila[claveTotales];
     }
 
     return { ...mapPlanillaConsultaRowToPagoRow(raw, 0, row.estado), id: row.id };
@@ -1452,6 +1471,12 @@ export default function PagosV2Page() {
   const [gastoEditorRequest, setGastoEditorRequest] = useState<GastoEditorRequest | null>(null);
   const [rechazoModal, setRechazoModal] = useState<RechazoModalState | null>(null);
   const [observacionModal, setObservacionModal] = useState<ObservacionModalState | null>(null);
+  // Columna "Cambiar estado": estados de Constante 'estado' (Correlativo = código, ValorIni = nombre) y
+  // empleados autorizados de Constante PERMISO_ESTADO (ValorIni = código de empleado).
+  const [estadoOpciones, setEstadoOpciones] = useState<Array<{ codigo: string; nombre: string }>>([]);
+  const [puedeCambiarEstado, setPuedeCambiarEstado] = useState(false);
+  const [cambioEstadoModal, setCambioEstadoModal] = useState<CambioEstadoModalState | null>(null);
+  const [estadoMasivo, setEstadoMasivo] = useState("");
   const [aprobarConfirm, setAprobarConfirm] = useState<AprobarConfirmState | null>(null);
   const [regularizarConfirm, setRegularizarConfirm] = useState<RegularizarConfirmState | null>(null);
   const [resumenOtDetalle, setResumenOtDetalle] = useState<ResumenOtDetalle | null>(null);
@@ -1685,7 +1710,9 @@ export default function PagosV2Page() {
       cacheKey: string,
       parametros: PlanillaConsultaParametro[],
       signal: AbortSignal,
-    ) => {
+      // true: no pinta; devuelve las filas ya completadas para que el llamador pinte una sola vez.
+      devolverFilas = false,
+    ): Promise<PagoRow[] | null> => {
       const correlativos = Array.from(
         new Set(
           filas
@@ -1694,7 +1721,7 @@ export default function PagosV2Page() {
         ),
       );
       if (correlativos.length === 0) {
-        return;
+        return null;
       }
 
       const tiposCambio = parametros.filter((parametro) => parametro.nombre.startsWith("TipoCambio"));
@@ -1721,7 +1748,7 @@ export default function PagosV2Page() {
               await new Promise((resolve) => setTimeout(resolve, 800 * intento));
             }
           }
-          if (signal.aborted) return;
+          if (signal.aborted) return null;
 
           for (const item of Array.isArray(response?.rows) ? response.rows : []) {
             totales.set(
@@ -1732,13 +1759,15 @@ export default function PagosV2Page() {
 
         }
 
-        if (signal.aborted) return;
+        if (signal.aborted) return null;
+        const filasCompletas = aplicarTotalesDiferidos(filas, totales);
+        // Recién con los totales completos la bandeja es reutilizable desde el caché.
+        tabRowsCacheRef.current.set(cacheKey, filasCompletas);
+        if (devolverFilas) return filasCompletas;
         // Una sola fusión, en transición: la grilla se reprocesa una vez y sin bloquear clics ni el cierre de sesión.
         startTransition(() => {
           setRowsByTab((previous) => ({ ...previous, [tab]: aplicarTotalesDiferidos(previous[tab], totales) }));
         });
-        // Recién con los totales completos la bandeja es reutilizable desde el caché.
-        tabRowsCacheRef.current.set(cacheKey, aplicarTotalesDiferidos(filas, totales));
       } catch (error) {
         if (!signal.aborted) {
           const detalleError = getHttpErrorMessage(error, "error");
@@ -1751,6 +1780,7 @@ export default function PagosV2Page() {
           setTotalesCargando(false);
         }
       }
+      return null;
     },
     [pushLoadTrace],
   );
@@ -2070,15 +2100,24 @@ export default function PagosV2Page() {
           return;
         }
 
+        // Pocas filas (p. ej. búsqueda por correlativo): se esperan los totales y se pinta una sola vez,
+        // para no mostrar valores provisionales (% OC en 20% y luego 60%).
+        const pocasFilas = usoLigero && nextRowsByTab[activeTab].length > 0 && nextRowsByTab[activeTab].length <= TOTALES_UNA_CARGA_MAX_FILAS;
+        if (pocasFilas) {
+          const completas = await cargarTotalesDiferidos(activeTab, nextRowsByTab[activeTab], cacheKey, parametros, signal, true);
+          if (signal.aborted || cancelled) return;
+          if (completas) nextRowsByTab[activeTab] = completas;
+        }
+
         pushLoadTrace(`Carga total: ${(performance.now() - loadStart).toFixed(0)} ms`);
         setRowsByTab((previous) => ({
           ...previous,
           [activeTab]: nextRowsByTab[activeTab],
         }));
-        if (usoLigero && nextRowsByTab[activeTab].length > 0) {
+        if (usoLigero && !pocasFilas && nextRowsByTab[activeTab].length > 0) {
           // Las columnas financieras (Total Gastado, % Ficticio, % OC...) llegan aparte, solo de las filas mostradas.
           void cargarTotalesDiferidos(activeTab, nextRowsByTab[activeTab], cacheKey, parametros, signal);
-        } else {
+        } else if (!pocasFilas) {
           tabRowsCacheRef.current.set(cacheKey, nextRowsByTab[activeTab]);
         }
       } catch (error) {
@@ -2302,6 +2341,42 @@ export default function PagosV2Page() {
     });
 
     return () => controller.abort();
+  }, []);
+
+  // Columna "Cambiar estado": solo si el código del empleado logueado figura en Constante PERMISO_ESTADO (ValorIni).
+  // Sin permiso (o si falla la consulta) la columna no se muestra y no se pide el catálogo de estados.
+  useEffect(() => {
+    let cancelado = false;
+    const authUser = getAuthUser();
+    const codigoEmpleado = String(authUser?.codEmp || authUser?.idEmpleado || authUser?.empleado || "").trim();
+    if (!codigoEmpleado) return;
+
+    void (async () => {
+      try {
+        const permisos = await getConstantesPorCampo("PERMISO_ESTADO");
+        const autorizado = permisos.some((item) => String(item.valorIni ?? "").trim() === codigoEmpleado);
+        if (cancelado || !autorizado) return;
+
+        const estados = await getConstantesPorCampo("estado");
+        if (cancelado) return;
+        setEstadoOpciones(
+          estados
+            .map((item) => ({
+              codigo: String(item.correlativo ?? "").trim(),
+              nombre: String(item.valorIni ?? "").trim(),
+            }))
+            .filter((item) => item.codigo !== "" && Number.isFinite(Number(item.codigo)))
+            .sort((a, b) => Number(a.codigo) - Number(b.codigo))
+        );
+        setPuedeCambiarEstado(true);
+      } catch {
+        if (!cancelado) setPuedeCambiarEstado(false);
+      }
+    })();
+
+    return () => {
+      cancelado = true;
+    };
   }, []);
 
   const resumenOpciones = useMemo(() => {
@@ -3764,6 +3839,97 @@ export default function PagosV2Page() {
     setObservacionModal(null);
   };
 
+  const solicitarCambioEstado = (row: PagoRow, nuevoEstado: string) => {
+    if (!nuevoEstado || nuevoEstado === String(row.estadoCodigo ?? "").trim()) return;
+    if (String(row.estadoCodigo ?? "").trim() === ESTADO_PAGADO) {
+      setMessage("El registro está PAGADO: no se puede modificar su estado.");
+      return;
+    }
+    setCambioEstadoModal({ rows: [row], nuevoEstado, observacion: "", submitting: false, error: null });
+  };
+
+  // Cambio masivo: aplica el "Estado modificar" a los registros seleccionados (se omiten los PAGADOS
+  // y los que ya tienen ese estado).
+  const solicitarCambioEstadoMasivo = () => {
+    if (!estadoMasivo) {
+      setMessage("Seleccione el estado en 'Estado modificar'.");
+      return;
+    }
+    if (selectedRows.length === 0) {
+      setMessage("Seleccione al menos un registro para cambiar su estado.");
+      return;
+    }
+    const elegibles = selectedRows.filter((row) => {
+      const actual = String(row.estadoCodigo ?? "").trim();
+      return actual !== ESTADO_PAGADO && actual !== estadoMasivo;
+    });
+    if (elegibles.length === 0) {
+      setMessage("Ningún registro seleccionado es modificable (PAGADOS o ya en ese estado).");
+      return;
+    }
+    setCambioEstadoModal({ rows: elegibles, nuevoEstado: estadoMasivo, observacion: "", submitting: false, error: null });
+  };
+
+  const handleConfirmarCambioEstado = async () => {
+    if (!cambioEstadoModal || cambioEstadoModal.submitting) return;
+
+    const { rows, nuevoEstado } = cambioEstadoModal;
+    const observacion = cambioEstadoModal.observacion.trim();
+    if (!observacion) {
+      setCambioEstadoModal((prev) => (prev ? { ...prev, error: "Debe ingresar el motivo del cambio de estado." } : prev));
+      return;
+    }
+
+    setCambioEstadoModal((prev) => (prev ? { ...prev, submitting: true, error: null } : prev));
+    const nombre = estadoOpciones.find((item) => item.codigo === nuevoEstado)?.nombre ?? nuevoEstado;
+    let procesados = 0;
+    let falloCorrelativo: string | number | null = null;
+    try {
+      // Uno por uno (mismo endpoint que el cambio individual); se detiene en el primer error.
+      for (const row of rows) {
+        falloCorrelativo = row.correlativo;
+        await cambiarEstadoManualPlanilla(
+          {
+            correlativo: Math.trunc(Number(row.correlativo)),
+            idSite: row.siteId,
+            nuevoEstado: Number(nuevoEstado),
+            observacion,
+          },
+          { timeoutMs: 60000 }
+        );
+        procesados += 1;
+      }
+
+      setCambioEstadoModal(null);
+      setMessage(
+        rows.length === 1
+          ? `Registro ${rows[0].correlativo}: estado cambiado a ${nuevoEstado} - ${nombre}.`
+          : `${procesados} registro(s) cambiados a ${nuevoEstado} - ${nombre}.`
+      );
+      // Los registros pueden pasar a otra bandeja: se vuelve a consultar la actual.
+      resetDetailStateAfterMutation();
+      setCheckedIds([]);
+      setSelectedId(0);
+      reloadAfterMutation();
+    } catch (error) {
+      const detalle = getHttpErrorMessage(error, "No se pudo cambiar el estado.");
+      setCambioEstadoModal((prev) =>
+        prev
+          ? {
+              ...prev,
+              rows: prev.rows.slice(procesados), // los ya cambiados no se reintentan
+              submitting: false,
+              error:
+                rows.length > 1
+                  ? `${procesados} de ${rows.length} procesado(s). Falló el registro ${falloCorrelativo}: ${detalle}`
+                  : detalle,
+            }
+          : prev
+      );
+      if (procesados > 0) reloadAfterMutation();
+    }
+  };
+
   const handleConfirmarAprobacion = async () => {
     if (!aprobarConfirm) {
       return;
@@ -4350,6 +4516,55 @@ export default function PagosV2Page() {
       cellRender: (value) => barCell(Number(value)),
     },
     {
+      dataField: "cambiarEstado",
+      caption: "Cambiar estado",
+      headerTooltip:
+        "Cambia directamente Planilla.Estado al estado elegido (pide un motivo).\n" +
+        "Estados: Constante 'estado' (código - nombre).\n" +
+        "Solo visible para los empleados de la constante PERMISO_ESTADO.",
+      width: 190,
+      // Solo en la pestaña Total Órdenes (showEstadoPlanilla === activeTab "resumen").
+      visible: puedeCambiarEstado && showEstadoPlanilla,
+      allowFiltering: false,
+      allowHeaderFilter: false,
+      allowSorting: false,
+      allowGrouping: false,
+      calculateCellValue: (row) => String(row.estadoCodigo ?? "").trim(),
+      cellRender: (value, row) => {
+        const actual = String(value ?? "").trim();
+        const opciones = estadoOpciones.some((item) => item.codigo === actual)
+          ? estadoOpciones
+          : [{ codigo: actual, nombre: row.estadoNombre || "Actual" }, ...estadoOpciones];
+        // Un recibo PAGADO (estado 4) no puede cambiar de estado: el selector queda deshabilitado.
+        const pagado = actual === ESTADO_PAGADO;
+        return (
+          <select
+            value={actual}
+            disabled={pagado}
+            title={pagado ? "Registro PAGADO: no se puede modificar el estado" : "Cambiar el estado del registro"}
+            style={{
+              width: "100%",
+              fontSize: 12,
+              padding: "2px 4px",
+              borderRadius: 6,
+              border: "1px solid #CBD5E1",
+              background: pagado ? "#F1F5F9" : "#FFFFFF",
+              cursor: pagado ? "not-allowed" : "pointer",
+            }}
+            onClick={(event) => event.stopPropagation()}
+            onDoubleClick={(event) => event.stopPropagation()}
+            onChange={(event) => solicitarCambioEstado(row, event.target.value)}
+          >
+            {opciones.map((item) => (
+              <option key={item.codigo} value={item.codigo}>
+                {item.codigo} - {item.nombre}
+              </option>
+            ))}
+          </select>
+        );
+      },
+    },
+    {
       dataField: "estadoNombre",
       caption: "Estado planilla",
       width: 130,
@@ -4425,7 +4640,7 @@ export default function PagosV2Page() {
     // Columnas estables: cualquier setState de la página (contadores, suma por responsable, totales) ya no
     // obliga a DataGridPro a filtrar/ordenar/agrupar de nuevo todas las filas. Solo cambian con estos valores.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  ], [sumaRespMap, sumaRespLoading, showEstadoPlanilla, showTotalSitio, getEstadoPlanillaNombre, tipoCambioUsd, tipoCambioEur, tipoCambioDop, tipoCambioCop]);
+  ], [sumaRespMap, sumaRespLoading, showEstadoPlanilla, showTotalSitio, getEstadoPlanillaNombre, tipoCambioUsd, tipoCambioEur, tipoCambioDop, tipoCambioCop, puedeCambiarEstado, estadoOpciones]);
 
   return (
     <AppPage title="Pagos" fillHeight style={{ padding: "4px 8px 0" }}>
@@ -4589,20 +4804,12 @@ export default function PagosV2Page() {
             </label>
             <label style={styles.cabeceraCampo}>
               <span style={styles.cabeceraEtiqueta}>Estado</span>
-              <select
-                value={filters.estado[0] ?? ""}
-                onChange={(event) =>
-                  setFilters((prev) => ({ ...prev, estado: event.target.value ? [event.target.value] : [] }))
-                }
-                style={styles.cabeceraControl}
-              >
-                <option value="">Todos</option>
-                {resumenOpciones.estados.map((estado) => (
-                  <option key={estado.codigo} value={estado.codigo}>
-                    {estado.nombre}
-                  </option>
-                ))}
-              </select>
+              <MultiSelectFiltro
+                opciones={resumenOpciones.estados}
+                seleccion={filters.estado}
+                onChange={(valores) => setFilters((prev) => ({ ...prev, estado: valores }))}
+                style={{ ...styles.cabeceraControl, minWidth: 180 }}
+              />
             </label>
             <label style={styles.cabeceraCampo}>
               <span style={styles.cabeceraEtiqueta}>Solicitante</span>
@@ -4636,6 +4843,35 @@ export default function PagosV2Page() {
             <button type="button" onClick={limpiarFiltrosCabecera} style={styles.cabeceraBotonSecundario}>
               Limpiar
             </button>
+            {puedeCambiarEstado ? (
+              <>
+                <label style={styles.cabeceraCampo}>
+                  <span style={styles.cabeceraEtiqueta}>Estado modificar</span>
+                  <select
+                    value={estadoMasivo}
+                    onChange={(event) => setEstadoMasivo(event.target.value)}
+                    style={{ ...styles.cabeceraControl, minWidth: 180 }}
+                    title="Estado que se aplicará a los registros seleccionados (cambio masivo)"
+                  >
+                    <option value="">Seleccione...</option>
+                    {estadoOpciones.map((opcion) => (
+                      <option key={opcion.codigo} value={opcion.codigo}>
+                        {opcion.codigo} - {opcion.nombre}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <button
+                  type="button"
+                  onClick={solicitarCambioEstadoMasivo}
+                  disabled={!estadoMasivo || checkedIds.length === 0}
+                  style={styles.cabeceraBotonSecundario}
+                  title="Cambia el estado de los registros marcados en la grilla"
+                >
+                  Cambiar estado ({checkedIds.length})
+                </button>
+              </>
+            ) : null}
             {filtroFechaPorDeposito ? (
               <span style={styles.cabeceraNota}>
                 Para PAGADO las fechas se comparan con la fecha de depósito; los demás estados usan la fecha de registro.
@@ -6090,6 +6326,77 @@ export default function PagosV2Page() {
                   disabled={observacionModal.submitting}
                 >
                   {observacionModal.submitting ? "Procesando..." : "Cancelar"}
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
+        {cambioEstadoModal ? (
+          <div
+            style={styles.rejectModalOverlay}
+            onClick={() => {
+              if (!cambioEstadoModal.submitting) setCambioEstadoModal(null);
+            }}
+            role="presentation"
+          >
+            <div
+              style={styles.rejectModalCard}
+              onClick={(event) => event.stopPropagation()}
+              role="dialog"
+              aria-modal="true"
+              aria-label="Cambiar estado del registro"
+            >
+              <div style={styles.popupHeader}>
+                <div>
+                  <div style={{ ...styles.sectionKicker, color: "#7C3AED" }}>Cambiar estado</div>
+                  <h3 style={styles.popupTitle}>
+                    {cambioEstadoModal.rows.length === 1
+                      ? `Registro ${cambioEstadoModal.rows[0].correlativo}`
+                      : `${cambioEstadoModal.rows.length} registros seleccionados`}
+                  </h3>
+                  <p style={styles.popupSubtitle}>
+                    {cambioEstadoModal.rows.length === 1
+                      ? `Estado actual: ${cambioEstadoModal.rows[0].estadoCodigo || "-"}`
+                      : "Cambio masivo (se omiten PAGADOS y los que ya tienen ese estado)"}{" "}→{" "}
+                    {cambioEstadoModal.nuevoEstado} -{" "}
+                    {estadoOpciones.find((item) => item.codigo === cambioEstadoModal.nuevoEstado)?.nombre ?? ""}
+                    . Ingrese el motivo del cambio (obligatorio).
+                  </p>
+                </div>
+              </div>
+
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                <textarea
+                  value={cambioEstadoModal.observacion}
+                  onChange={(event) =>
+                    setCambioEstadoModal((prev) =>
+                      prev ? { ...prev, observacion: event.target.value, error: null } : prev
+                    )
+                  }
+                  rows={4}
+                  placeholder="Motivo del cambio de estado"
+                  style={styles.rejectModalTextarea}
+                  disabled={cambioEstadoModal.submitting}
+                />
+                {cambioEstadoModal.error ? <div style={styles.errorBanner}>{cambioEstadoModal.error}</div> : null}
+              </div>
+
+              <div style={styles.rejectModalActions}>
+                <button
+                  type="button"
+                  style={{ ...styles.slimActionButton, borderColor: "#C4B5FD", color: "#6D28D9" }}
+                  onClick={() => void handleConfirmarCambioEstado()}
+                  disabled={cambioEstadoModal.submitting}
+                >
+                  {cambioEstadoModal.submitting ? "Procesando..." : "Cambiar estado"}
+                </button>
+                <button
+                  type="button"
+                  style={{ ...styles.slimActionButton, borderColor: "#93C5FD", color: "#1D4ED8" }}
+                  onClick={() => setCambioEstadoModal(null)}
+                  disabled={cambioEstadoModal.submitting}
+                >
+                  Cancelar
                 </button>
               </div>
             </div>

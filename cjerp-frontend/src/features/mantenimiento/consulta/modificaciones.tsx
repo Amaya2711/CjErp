@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import DataGridBase, { type DataGridColumn } from "../../../components/base/DataGridBase";
+import DataGridPro from "../../../components/datagrid/DataGridPro";
+import type { GridColumn } from "../../../components/datagrid/types";
 import { consultarAuditoriaCambios } from "../../../api/auditoriaCambiosService";
 import type { AuditoriaCambioFiltro, AuditoriaCambioItem } from "../../../models/auditoria";
 import { getHttpErrorMessage } from "../../../utils/httpError";
@@ -23,28 +24,6 @@ const initialFilters: FilterState = {
   fechaHasta: "",
   top: "300",
 };
-
-function formatDateTime(value?: string | null) {
-  if (!value) return "";
-
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) {
-    return value;
-  }
-
-  return parsed.toLocaleString("es-PE", {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
-
-function truncateText(value?: string | null, max = 90) {
-  if (!value) return "";
-  return value.length > max ? `${value.slice(0, max)}...` : value;
-}
 
 export default function ModificacionesPage() {
   const [filters, setFilters] = useState<FilterState>(initialFilters);
@@ -92,74 +71,36 @@ export default function ModificacionesPage() {
     return { total, inserts, updates, users };
   }, [rows]);
 
-  const columns = useMemo<DataGridColumn<AuditoriaCambioItem>[]>(() => [
+  const columns = useMemo<GridColumn<AuditoriaCambioItem>[]>(() => [
+    { dataField: "fechaAccion", caption: "Fecha", dataType: "datetime", width: 150, sortOrder: "desc" },
+    { dataField: "modulo", caption: "Modulo", width: 130 },
+    { dataField: "entidad", caption: "Entidad", width: 150 },
+    { dataField: "idRegistro", caption: "Registro", width: 100 },
     {
-      key: "fechaAccion",
-      header: "Fecha",
-      render: (row) => formatDateTime(row.fechaAccion),
+      dataField: "accion",
+      caption: "Accion",
+      alignment: "center",
+      width: 110,
+      cellRender: (value) => {
+        const accion = String(value ?? "");
+        return (
+          <span
+            style={{
+              ...styles.actionPill,
+              background: accion === "INSERT" ? "#DCFCE7" : "#DBEAFE",
+              color: accion === "INSERT" ? "#166534" : "#1D4ED8",
+            }}
+          >
+            {accion}
+          </span>
+        );
+      },
     },
-    {
-      key: "modulo",
-      header: "Modulo",
-      render: (row) => row.modulo,
-    },
-    {
-      key: "entidad",
-      header: "Entidad",
-      render: (row) => row.entidad,
-    },
-    {
-      key: "idRegistro",
-      header: "Registro",
-      render: (row) => row.idRegistro,
-    },
-    {
-      key: "accion",
-      header: "Accion",
-      align: "center",
-      render: (row) => (
-        <span
-          style={{
-            ...styles.actionPill,
-            background: row.accion === "INSERT" ? "#DCFCE7" : "#DBEAFE",
-            color: row.accion === "INSERT" ? "#166534" : "#1D4ED8",
-          }}
-        >
-          {row.accion}
-        </span>
-      ),
-    },
-    {
-      key: "campo",
-      header: "Campo",
-      render: (row) => row.campo,
-    },
-    {
-      key: "valorAnterior",
-      header: "Valor anterior",
-      render: (row) => (
-        <span title={row.valorAnterior ?? ""}>{truncateText(row.valorAnterior)}</span>
-      ),
-    },
-    {
-      key: "valorNuevo",
-      header: "Valor nuevo",
-      render: (row) => (
-        <span title={row.valorNuevo ?? ""}>{truncateText(row.valorNuevo)}</span>
-      ),
-    },
-    {
-      key: "usuarioAccion",
-      header: "Usuario",
-      render: (row) => row.usuarioAccion,
-    },
-    {
-      key: "observacion",
-      header: "Observacion",
-      render: (row) => (
-        <span title={row.observacion ?? ""}>{truncateText(row.observacion)}</span>
-      ),
-    },
+    { dataField: "campo", caption: "Campo", width: 140 },
+    { dataField: "valorAnterior", caption: "Valor anterior", width: 220 },
+    { dataField: "valorNuevo", caption: "Valor nuevo", width: 220 },
+    { dataField: "usuarioAccion", caption: "Usuario", width: 130 },
+    { dataField: "observacion", caption: "Observacion", width: 220 },
   ], []);
 
   return (
@@ -278,13 +219,19 @@ export default function ModificacionesPage() {
 
         {error ? <div style={styles.errorBanner}>{error}</div> : null}
 
-        <DataGridBase
+        <DataGridPro<AuditoriaCambioItem>
+          dataSource={rows}
           columns={columns}
-          rows={rows}
+          keyExpr="idAuditoria"
+          height="65vh"
           loading={loading}
-          loadingMessage="Cargando monitor de modificaciones..."
-          emptyMessage="No hay cambios registrados para los filtros seleccionados."
-          getRowKey={(row) => row.idAuditoria}
+          noDataText="No hay cambios registrados para los filtros seleccionados."
+          stateStoringKey="auditoria-modificaciones"
+          showSearchPanel={false}
+          autoExpandAll={false}
+          rowAlternation={false}
+          rowPadding="4px 8px"
+          paging={{ pageSize: 50, pageSizes: [20, 50, 100, 250] }}
         />
       </div>
     </section>

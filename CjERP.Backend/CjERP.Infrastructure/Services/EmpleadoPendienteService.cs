@@ -3,6 +3,7 @@ using CjERP.Application.DTOs;
 using CjERP.Application.Interfaces.Services;
 using CjERP.Infrastructure.Persistence.Sql;
 using Dapper;
+using QuestPDF.Fluent;
 
 namespace CjERP.Infrastructure.Services;
 
@@ -11,6 +12,9 @@ public class EmpleadoPendienteService : IEmpleadoPendienteService
     private const string BuscarSp = "dbo.sp_EmpleadoPendiente_Listar";
     private const string InsertarSp = "dbo.sp_EmpleadoPendiente_Insertar";
     private const string ActualizarSp = "dbo.sp_EmpleadoPendiente_Actualizar";
+
+    // Estado 5 = RECHAZADO: no se incluye en el PDF.
+    private const int IdEstadoRechazado = 5;
 
     private readonly ISqlCommandFactory _sqlCommandFactory;
 
@@ -31,6 +35,47 @@ public class EmpleadoPendienteService : IEmpleadoPendienteService
                 CommandType.StoredProcedure,
                 cancellationToken,
                 commandTimeout: 120));
+    }
+
+    public async Task<(byte[] Contenido, string NombreArchivo)?> GenerarPdfAsync(
+        EmpleadoPendientePdfRequestDto request,
+        CancellationToken cancellationToken = default)
+    {
+        var items = (await BuscarAsync(
+            new EmpleadoPendienteBuscarRequestDto
+            {
+                IdEmpleado = request.IdEmpleado,
+                IdResponsable = request.IdResponsable,
+                IdEstado = request.IdEstado
+            },
+            cancellationToken))
+            .Where(x => x.IdEstado != IdEstadoRechazado)
+            .ToList();
+
+        if (items.Count == 0)
+        {
+            return null;
+        }
+
+        var ahora = HoraLima();
+        var pdf = new EmpleadoPendientePdfDocument(items, ahora).GeneratePdf();
+        return (pdf, $"pendientes_{ahora:yyyyMMdd_HHmm}.pdf");
+    }
+
+    private static DateTime HoraLima()
+    {
+        foreach (var id in new[] { "America/Lima", "SA Pacific Standard Time" })
+        {
+            try
+            {
+                return TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, TimeZoneInfo.FindSystemTimeZoneById(id));
+            }
+            catch (TimeZoneNotFoundException)
+            {
+            }
+        }
+
+        return DateTime.UtcNow.AddHours(-5);
     }
 
     public async Task<EmpleadoPendienteCommandResultDto> InsertarAsync(
@@ -80,9 +125,8 @@ public class EmpleadoPendienteService : IEmpleadoPendienteService
         parameters.Add("@IdPendiente", request.IdPendiente, DbType.Int32);
         parameters.Add("@IdEmpleado", request.IdEmpleado, DbType.Int32);
         parameters.Add("@IdResponsable", request.IdResponsable, DbType.Int32);
-        // El store permite estado por defecto 1 para registros nuevos, pero si enviamos NULL
-        // desde Dapper se pierde ese default SQL y falla el INSERT.
-        parameters.Add("@IdEstado", request.IdEstado ?? 1, DbType.Int32);
+        // NULL = todos los estados (incluidos observado/rechazado). El default 1 solo aplica al insertar.
+        parameters.Add("@IdEstado", request.IdEstado, DbType.Int32);
         parameters.Add("@FechaInicio", request.FechaInicio, DbType.Date);
         parameters.Add("@FechaFin", request.FechaFin, DbType.Date);
         return parameters;

@@ -10,6 +10,13 @@ public class EmpleadoPendienteBuscarRequestDto
     public DateTime? FechaFin { get; set; }
 }
 
+public class EmpleadoPendientePdfRequestDto
+{
+    public int? IdEmpleado { get; set; }
+    public int? IdResponsable { get; set; }
+    public int? IdEstado { get; set; }
+}
+
 public class EmpleadoPendienteInsertRequestDto
 {
     public int IdEmpleado { get; set; }
@@ -51,6 +58,8 @@ public class EmpleadoPendienteDto
     public int IdPendiente { get; set; }
     public int IdEmpleado { get; set; }
     public string NombreEmpleado { get; set; } = string.Empty;
+    public string? CorreoEmpleado { get; set; }
+    public string? CorreoResponsable { get; set; }
     public DateTime? FechaInicio { get; set; }
     public DateTime? FechaEstimacionTermino { get; set; }
     public DateTime? FechaRealTermino { get; set; }

@@ -23,6 +23,7 @@ import type { ValoresGastoRequest, ValoresGastoResponse } from "../../../models/
 import { getAuthUser } from "../../../utils/authStorage";
 import { compressImageForUpload } from "../../../utils/imageCompression";
 import { buildSharePointUrl } from "../../../utils/sharepoint";
+import { descargarAdjuntoBlob, esCodigoLegacy, tipoMedioDesdeBlob, urlVisibleAdjunto } from "../../../utils/adjuntos";
 import { getHttpErrorMessage } from "../../../utils/httpError";
 import DataGridPro from "../../../components/datagrid/DataGridPro";
 import type { GridColumn } from "../../../components/datagrid/types";
@@ -970,15 +971,22 @@ async function abrirFacturaEnPestana(ruta: string) {
   };
 
   try {
-    const archivo = await httpClient.get<Blob>(`${GASTOS_API_URL}/factura`, {
-      params: { ruta },
-      responseType: "blob",
-    });
+    const archivo = await descargarAdjuntoBlob(ruta, (r) =>
+      httpClient.get<Blob>(`${GASTOS_API_URL}/factura`, {
+        params: { ruta: r },
+        responseType: "blob",
+      })
+    );
     const objectUrl = URL.createObjectURL(archivo);
     abrir(objectUrl);
     window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
   } catch {
-    abrir(buildSharePointUrl(ruta));
+    if (esCodigoLegacy(ruta)) {
+      ventana?.close();
+      window.alert("No se pudo recuperar el documento desde el sistema antiguo.");
+    } else {
+      abrir(buildSharePointUrl(ruta));
+    }
   }
 }
 
@@ -1561,6 +1569,7 @@ const [busqueda, setBusqueda] = useState("");
   const [facturaViewerUrl, setFacturaViewerUrl] = useState("");
   const [facturaViewerLoading, setFacturaViewerLoading] = useState(false);
   const [facturaViewerError, setFacturaViewerError] = useState("");
+  const [facturaViewerTipo, setFacturaViewerTipo] = useState<"image" | "pdf" | "unknown">("unknown");
   const [valoresGasto, setValoresGasto] = useState<ValoresGastoResponse>(VALORES_GASTO_INICIALES);
   const [valoresGastoLoading, setValoresGastoLoading] = useState(false);
   const valoresGastoRequestRef = useRef(0);
@@ -2811,8 +2820,10 @@ const [busqueda, setBusqueda] = useState("");
   // SharePoint. Siempre se resuelven contra la base corporativa, incluso al
   // visualizar, para evitar que el navegador las interprete como rutas SPA.
   const facturaSourcePath = getFacturaDisplayPath(form.facturaPath, form.facturaUrl);
-  const facturaDisplayPath = buildSharePointUrl(facturaSourcePath);
-  const facturaMediaType = getFacturaMediaType(facturaDisplayPath);
+  // Regla de adjuntos: primero SharePoint; un código numérico es del sistema antiguo (elnk.uno).
+  const facturaEsLegacy = esCodigoLegacy(facturaSourcePath);
+  const facturaDisplayPath = urlVisibleAdjunto(facturaSourcePath);
+  const facturaMediaType = facturaEsLegacy ? facturaViewerTipo : getFacturaMediaType(facturaDisplayPath);
 
   useEffect(() => {
     if (!showFacturaViewer || !facturaSourcePath) {
@@ -2827,18 +2838,22 @@ const [busqueda, setBusqueda] = useState("");
     setFacturaViewerLoading(true);
     setFacturaViewerError("");
 
-    void httpClient
-      .get<Blob>(`${GASTOS_API_URL}/factura`, {
-        params: { ruta: facturaSourcePath },
+    void descargarAdjuntoBlob(facturaSourcePath, (ruta) =>
+      httpClient.get<Blob>(`${GASTOS_API_URL}/factura`, {
+        params: { ruta },
         responseType: "blob",
       })
+    )
       .then((archivo) => {
         if (!activo) return;
+        setFacturaViewerTipo(tipoMedioDesdeBlob(archivo));
         objectUrl = URL.createObjectURL(archivo);
         setFacturaViewerUrl(objectUrl);
       })
       .catch(() => {
-        if (activo) {
+        if (activo && facturaEsLegacy) {
+          setFacturaViewerError("No se pudo recuperar el documento desde el sistema antiguo.");
+        } else if (activo) {
           // SharePoint may deny embedding even though the current user can open
           // the file directly. In that case, open its native viewer in a new
           // tab (PDFs and images are both supported).
@@ -2856,7 +2871,7 @@ const [busqueda, setBusqueda] = useState("");
       activo = false;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [facturaDisplayPath, facturaSourcePath, showFacturaViewer]);
+  }, [facturaDisplayPath, facturaEsLegacy, facturaSourcePath, showFacturaViewer]);
 
   const subirFactura = async (file: File) => {
     const formData = new FormData();
@@ -6346,9 +6361,11 @@ const [busqueda, setBusqueda] = useState("");
             <header style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "12px 16px", borderBottom: "1px solid #E2E8F0" }}>
               <strong style={{ color: "#17143A", fontSize: 14 }}>Documento adjunto</strong>
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                {!facturaEsLegacy && (
                 <a href={facturaDisplayPath} target="_blank" rel="noopener noreferrer" style={{ color: "#6E4CCB", fontSize: 12, fontWeight: 700 }}>
                   Abrir en SharePoint
                 </a>
+                )}
                 <button type="button" onClick={() => setShowFacturaViewer(false)} aria-label="Cerrar visor" style={{ border: "1px solid #CBD5E1", borderRadius: 7, background: "#FFFFFF", color: "#334155", width: 30, height: 30, fontSize: 18, cursor: "pointer" }}>
                   ×
                 </button>

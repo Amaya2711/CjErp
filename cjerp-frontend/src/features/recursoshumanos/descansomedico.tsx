@@ -22,7 +22,7 @@ import {
 } from "../../api/descansoService";
 import { seguridadPermisosAccionesService } from "../seguridad/services/seguridadPermisosAccionesService";
 import { getAuthUser, hasFullPageActionAccess } from "../../utils/authStorage";
-import { buildSharePointUrl } from "../../utils/sharepoint";
+import { abrirAdjunto } from "../../utils/adjuntos";
 import { getHttpErrorMessage } from "../../utils/httpError";
 
 type DescansoTab = "ingreso" | "aprobar" | "pendientes" | "reporte";
@@ -390,12 +390,12 @@ export default function DescansoMedicoPage() {
     }
   }
 
-  function verAdjunto(fila: Descanso) {
-    if (!fila.ruta) {
-      window.alert("No hay ruta de documento registrada.");
-      return;
+  async function verAdjunto(fila: Descanso) {
+    try {
+      await abrirAdjunto(fila.ruta);
+    } catch (error) {
+      window.alert(getHttpErrorMessage(error, "No se pudo abrir el documento adjunto."));
     }
-    window.open(buildSharePointUrl(fila.ruta), "_blank", "noopener,noreferrer");
   }
 
   const columnasIngreso = useMemo<DataGridColumn<Descanso>[]>(

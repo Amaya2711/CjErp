@@ -8,6 +8,8 @@ export type EmpleadoPendienteDto = {
   idPendiente: number;
   idEmpleado: number;
   nombreEmpleado: string;
+  correoEmpleado?: string | null;
+  correoResponsable?: string | null;
   fechaInicio?: string | null;
   fechaEstimacionTermino?: string | null;
   fechaRealTermino?: string | null;

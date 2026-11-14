@@ -336,6 +336,27 @@ export async function rechazarPlanilla(
   );
 }
 
+/**
+ * Cambio manual y directo de Planilla.Estado (columna "Cambiar estado" de pagos_v2).
+ * El backend exige que el empleado figure en Constante PERMISO_ESTADO y registra el motivo.
+ */
+export async function cambiarEstadoManualPlanilla(
+  request: { correlativo: number; idSite: string; nuevoEstado: number; observacion: string },
+  options?: { timeoutMs?: number }
+): Promise<void> {
+  await httpClient.post(
+    `${PLANILLA_CONSULTA_API_URL}/${encodeURIComponent(String(Math.trunc(request.correlativo)))}/estado-manual`,
+    {
+      idSite: request.idSite,
+      nuevoEstado: Math.trunc(request.nuevoEstado),
+      observacion: request.observacion,
+    },
+    {
+      timeout: options?.timeoutMs,
+    }
+  );
+}
+
 export function buildPlanillaPagadosDashboardRequest(args: {
   fechaInicio: string;
   fechaFin: string;

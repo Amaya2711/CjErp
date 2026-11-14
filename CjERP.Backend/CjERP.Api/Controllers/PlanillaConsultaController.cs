@@ -602,6 +602,53 @@ namespace CjERP.Api.Controllers
             }
         }
 
+        /// <summary>
+        /// Cambio manual de Planilla.Estado (columna "Cambiar estado" de pagos_v2). El servicio valida que el código de
+        /// empleado del JWT figure en Constante PERMISO_ESTADO y que el estado exista en Constante 'estado'.
+        /// </summary>
+        [HttpPost("{correlativo:int}/estado-manual")]
+        public async Task<IActionResult> CambiarEstadoManual(
+            int correlativo,
+            [FromBody] PlanillaCambiarEstadoManualRequestDto request,
+            CancellationToken cancellationToken)
+        {
+            if (correlativo <= 0 || request is null || string.IsNullOrWhiteSpace(request.IdSite))
+            {
+                return BadRequest(new { success = false, message = "El correlativo y el IdSite son obligatorios." });
+            }
+
+            if (string.IsNullOrWhiteSpace(request.Observacion))
+            {
+                return BadRequest(new { success = false, message = "Debe ingresar el motivo del cambio de estado." });
+            }
+
+            // Mismo código que muestra la web como "Codigo" del empleado (claim CodEmp).
+            var codEmpleado = int.TryParse(
+                ResolveNumericClaimValue(User.FindFirstValue("CodEmp"), User.FindFirstValue("codEmp")),
+                out var codigo) ? codigo : ResolveCodEmpleado();
+
+            try
+            {
+                var resultado = await _planillaService.CambiarEstadoManualAsync(
+                    correlativo,
+                    request,
+                    codEmpleado,
+                    ResolveUsuarioAccion(),
+                    cancellationToken);
+
+                return Ok(new { success = true, message = "Estado actualizado correctamente.", data = resultado });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(new { success = false, message = ex.Message });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "[PlanillaConsulta] Error cambiando manualmente el estado del correlativo {Correlativo}", correlativo);
+                throw;
+            }
+        }
+
         private static string GetStoredProcedureLabel(string? consulta)
         {
             return (consulta ?? string.Empty).Trim().ToLowerInvariant() switch
