@@ -183,7 +183,7 @@ const claveNombre = (v: string) =>
 const normDoc = (v: string | null | undefined) => String(v ?? "").replace(/[^0-9A-Za-z]/g, "").toUpperCase();
 // Clave de cliente para unir ventas y costos: RUC/DNI y, si no hay, IdCliente o nombre.
 // Clientes que se quitan de ventas, costos y rentabilidad mientras esté marcada la casilla de exclusión del filtro de clientes.
-const CLIENTES_EXCLUIDOS_DEFECTO = ["PLANILLA", "CJ TELECOM"];
+const CLIENTES_EXCLUIDOS_DEFECTO = ["PLANILLA", "CJ TELECOM", "VACA_CJ"];
 const CLIENTE_FINANCIERO = "FINANCIERO"; // se quita con su propia casilla (SIN FINANCIERO)
 const claveNombreCliente = (n: string) =>
   n.normalize("NFD").replace(/[̀-ͯ]/g, "").toUpperCase().replace(/[^A-Z0-9]+/g, " ").trim();

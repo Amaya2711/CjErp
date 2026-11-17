@@ -87,7 +87,17 @@ type VacacionMovimientoRegistro = {
   fechaFin: string;
 };
 
-type EstadoTab = "todos" | "97" | "98" | "99" | "resumen" | "movimientos";
+type EstadoTab = "todos" | "97" | "98" | "99" | "resumen" | "saldos" | "movimientos";
+
+type SaldoEmpleadoRegistro = {
+  rowKey: string;
+  idEmpleadoCj: number;
+  nombreEmpleado: string;
+  nroDocumento: string;
+  empresa: string;
+  cliente: string;
+  saldoVacaciones: number;
+};
 
 type ResumenEmpleadoItem = {
   idEmpleadoCj: number;
@@ -131,6 +141,7 @@ const ESTADO_TABS: Array<{ key: EstadoTab; label: string; estado?: number }> = [
   { key: "98", label: "2da validación", estado: 98 },
   { key: "99", label: "3ra validación", estado: 99 },
   { key: "resumen", label: "Resumen" },
+  { key: "saldos", label: "Saldo pendiente" },
   { key: "movimientos", label: "Movimientos" },
 ];
 
@@ -147,6 +158,7 @@ const TAB_ACTION_KEYS: Record<EstadoTab, string | null> = {
   "98": "tab.validacion_2",
   "99": "tab.validacion_3",
   resumen: "tab.resumen",
+  saldos: "tab.saldo_pendiente",
   movimientos: null,
 };
 
@@ -1069,7 +1081,7 @@ export default function VacacionesPage() {
   }, [activeTab, selectedResumenContrato?.nombreEmpleado, selectedResumenEmpleado?.nombreEmpleado]);
 
   useEffect(() => {
-    if (activeTab !== "resumen") {
+    if (activeTab !== "resumen" && activeTab !== "saldos") {
       return;
     }
 
@@ -2324,6 +2336,45 @@ export default function VacacionesPage() {
     [accionesFilaDeshabilitadas, procesando, puedeAprobar, puedeRechazar, puedeModificar]
   );
 
+  // Todos los empleados (EmpleadoCj) con su saldo de vacaciones pendiente; incluye a quienes tienen saldo 0.
+  const saldoEmpleadosRows = useMemo<SaldoEmpleadoRegistro[]>(() => {
+    return resumenActivos
+      .map((employee) => {
+        const idEmpleado = Number(employee.idEmpleado);
+        const contrato = resumenContratos[idEmpleado];
+        const total = resumenTotalesPorEmpleado.get(idEmpleado);
+        return {
+          rowKey: String(idEmpleado),
+          idEmpleadoCj: idEmpleado,
+          nombreEmpleado: (employee.nombreEmpleado || contrato?.nombreEmpleado || `Empleado ${idEmpleado}`).trim(),
+          nroDocumento: String(employee.nroDocumento ?? "").trim(),
+          empresa: (contrato?.empresa || total?.empresa || "").trim(),
+          cliente: (contrato?.cliente || total?.cliente || "").trim(),
+          saldoVacaciones: total?.saldo ?? 0,
+        };
+      })
+      .sort((a, b) => b.saldoVacaciones - a.saldoVacaciones || a.nombreEmpleado.localeCompare(b.nombreEmpleado));
+  }, [resumenActivos, resumenContratos, resumenTotalesPorEmpleado]);
+
+  const saldoEmpleadosColumns = useMemo<GridColumn<SaldoEmpleadoRegistro>[]>(
+    () => [
+      { dataField: "idEmpleadoCj", caption: "ID", dataType: "number", width: 80 },
+      { dataField: "nombreEmpleado", caption: "Empleado" },
+      { dataField: "nroDocumento", caption: "Documento", width: 130 },
+      { dataField: "empresa", caption: "Empresa" },
+      { dataField: "cliente", caption: "Cliente" },
+      {
+        dataField: "saldoVacaciones",
+        caption: "Días pendientes",
+        dataType: "number",
+        alignment: "right",
+        width: 140,
+        calculateCellValue: (row) => Number(row.saldoVacaciones.toFixed(2)),
+      },
+    ],
+    []
+  );
+
   const resumenDetalleColumns = useMemo<GridColumn<VacacionRegistro>[]>(
     () => [
       { dataField: "fechaInicio", caption: "Fecha inicio", calculateCellValue: (row) => formatDateDisplay(row.fechaInicio) },
@@ -2402,6 +2453,25 @@ export default function VacacionesPage() {
 
         {activeTab === "resumen" ? (
           renderResumenView()
+        ) : activeTab === "saldos" ? (
+          <DataGridPro<SaldoEmpleadoRegistro>
+            dataSource={saldoEmpleadosRows}
+            columns={saldoEmpleadosColumns}
+            keyExpr="rowKey"
+            height="65vh"
+            loading={resumenTotalesLoading || resumenLoading || employeesLoading}
+            noDataText="No se encontraron empleados."
+            onRowDoubleClick={(row) => {
+              setMovimientoEmpleadoId(String(row.idEmpleadoCj));
+              setMovimientoEmpleadoSearch(row.nombreEmpleado);
+              setActiveTab("movimientos");
+            }}
+            stateStoringKey="vacaciones_saldo_pendiente"
+            exportFileName="vacaciones_saldo_pendiente"
+            allowExport
+            rowAlternation={false}
+            rowPadding="4px 8px"
+          />
         ) : activeTab === "movimientos" ? (
           renderMovimientosView()
         ) : (
