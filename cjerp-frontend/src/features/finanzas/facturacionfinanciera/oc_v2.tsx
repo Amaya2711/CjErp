@@ -6206,15 +6206,29 @@ const ResponsableTypeahead = React.memo(function ResponsableTypeahead({
   const [inputValue, setInputValue] = useState("");
   const [showDropdown, setShowDropdown] = useState(false);
   const [highlightedIdx, setHighlightedIdx] = useState(-1);
+  // Opción elegida por el usuario (fila exacta: un mismo empleado puede tener varias cuentas) y último id que
+  // el propio componente envió al padre, para no reaccionar a sus propios cambios.
+  const pickedRef = useRef<EmpleadoCta | null>(null);
+  const lastEmittedRef = useRef<string | null>(null);
 
   const selectedOption = useMemo(
     () => options.find((emp) => String(emp.idEmpleado) === selectedId) ?? null,
     [options, selectedId]
   );
 
+  // Sincroniza el texto solo cuando el valor cambia desde afuera (p. ej. al cargar una OC para editar). Los cambios
+  // originados aquí (escribir, elegir) no deben reescribir ni vaciar lo que el usuario está viendo.
   useEffect(() => {
+    if (lastEmittedRef.current === selectedId) return;
+    lastEmittedRef.current = selectedId;
+    const picked = pickedRef.current;
+    if (picked && String(picked.idEmpleado) === selectedId) {
+      setInputValue(buildResponsableDisplay(picked));
+      return;
+    }
+    pickedRef.current = null;
     setInputValue(selectedOption ? buildResponsableDisplay(selectedOption) : "");
-  }, [selectedOption]);
+  }, [selectedId, selectedOption]);
 
   const filteredOptions = useMemo(() => {
     const query = inputValue.trim().toLowerCase();
@@ -6223,7 +6237,10 @@ const ResponsableTypeahead = React.memo(function ResponsableTypeahead({
   }, [inputValue, options]);
 
   const applySelection = useCallback((emp: EmpleadoCta) => {
-    onSelect(String(emp.idEmpleado));
+    const id = String(emp.idEmpleado);
+    pickedRef.current = emp;
+    lastEmittedRef.current = id;
+    onSelect(id);
     setInputValue(buildResponsableDisplay(emp));
     setShowDropdown(false);
     setHighlightedIdx(-1);
@@ -6238,7 +6255,11 @@ const ResponsableTypeahead = React.memo(function ResponsableTypeahead({
           setInputValue(event.target.value);
           setShowDropdown(true);
           setHighlightedIdx(-1);
-          if (selectedId) onSelect("");
+          if (selectedId) {
+            pickedRef.current = null;
+            lastEmittedRef.current = "";
+            onSelect("");
+          }
         }}
         onFocus={() => setShowDropdown(true)}
         onBlur={() => setTimeout(() => setShowDropdown(false), 120)}
