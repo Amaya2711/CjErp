@@ -1065,7 +1065,7 @@ export default function AnalisisPage() {
         </AppStatusMessage>
       ) : null}
 
-      <div style={styles.kpiGrid}>
+      <div style={{ ...styles.kpiGrid, gridTemplateColumns: "repeat(6, minmax(0, 1fr))" }}>
         <AppCard style={{ ...styles.kpiCard, background: "linear-gradient(135deg, #F0FDF4 0%, #DCFCE7 100%)" }}>
           <div style={styles.kpiLabel}>Ingresos totales</div>
           <div style={{ ...styles.kpiValue, color: "#166534" }}>{formatCurrency(totalIngresos, "PEN")}</div>
@@ -1091,6 +1091,16 @@ export default function AnalisisPage() {
           <div style={{ ...styles.kpiValue, color: "#92400E" }}>{formatPercent(avance)}</div>
           <div style={styles.kpiHelper}>Referencia gerencial</div>
         </AppCard>
+        <AppCard style={styles.highlightCard}>
+          <div style={styles.kpiLabel}>Quien gana mas</div>
+          <div style={styles.highlightTitle}>{topWinner?.label ?? "-"}</div>
+          <div style={{ ...styles.kpiValue, color: "#166534" }}>{formatCurrency(topWinner?.netoPen ?? 0, "PEN")}</div>
+        </AppCard>
+        <AppCard style={styles.highlightCard}>
+          <div style={styles.kpiLabel}>Quien pierde mas</div>
+          <div style={styles.highlightTitle}>{topLoser?.label ?? "-"}</div>
+          <div style={{ ...styles.kpiValue, color: "#991B1B" }}>{formatCurrency(topLoser?.netoPen ?? 0, "PEN")}</div>
+        </AppCard>
       </div>
 
       {loading ? (
@@ -1105,56 +1115,6 @@ export default function AnalisisPage() {
         </AppCard>
       ) : (
         <>
-          <div style={styles.kpiGrid}>
-            <AppCard style={styles.winnerScopeCard}>
-                <div style={styles.winnerScopeRow}>
-                  <div>
-                    <div style={styles.kpiLabel}>Criterio de seleccion</div>
-                  </div>
-                  <div style={styles.winnerScopeActions}>
-                  {(["cliente", "proyecto", "site"] as LevelKey[]).map((level) => (
-                    <button
-                      key={level}
-                      type="button"
-                      style={winnerScopeLevel === level ? styles.kpiPillButtonActive : styles.kpiPillButton}
-                      onClick={() => {
-                        startTransition(() => {
-                          setWinnerScopeLevel(level);
-                      
-                          if (level === "cliente") {
-                            setSelectedCliente("");
-                            setSelectedProyecto("");
-                            setSelectedSite("");
-                            return;
-                          }
-
-                          if (level === "proyecto") {
-                            setSelectedCliente("");
-                            setSelectedProyecto("");
-                            setSelectedSite("");
-                            return;
-                          }
-                        });
-                      }}
-                      aria-pressed={winnerScopeLevel === level}
-                    >
-                      {level === "cliente" ? "Por cliente" : level === "proyecto" ? "Por proyecto" : "Por site"}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </AppCard>
-            <AppCard style={styles.highlightCard}>
-              <div style={styles.kpiLabel}>Quien gana mas</div>
-              <div style={styles.highlightTitle}>{topWinner?.label ?? "-"}</div>
-              <div style={{ ...styles.kpiValue, color: "#166534" }}>{formatCurrency(topWinner?.netoPen ?? 0, "PEN")}</div>
-            </AppCard>
-            <AppCard style={styles.highlightCard}>
-              <div style={styles.kpiLabel}>Quien pierde mas</div>
-              <div style={styles.highlightTitle}>{topLoser?.label ?? "-"}</div>
-              <div style={{ ...styles.kpiValue, color: "#991B1B" }}>{formatCurrency(topLoser?.netoPen ?? 0, "PEN")}</div>
-            </AppCard>
-          </div>
 
           <div style={styles.analysisGrid}>
             <AppCard style={styles.analysisChartCard}>

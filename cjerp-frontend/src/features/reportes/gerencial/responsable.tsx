@@ -177,7 +177,10 @@ export default function ReporteResponsablePage() {
         new Map(
           catalogoOperativo
             .filter((f) => String(f.idCliente) === idClienteSel && (!idProyectoSel || String(f.idProyecto) === idProyectoSel))
-            .map((f) => [f.idSite, [f.idSite, f.nombreSite].filter(Boolean).join(" - ")]),
+            .map((f) => [
+              `${f.idSite}|${Number(f.correlativo) || 0}`,
+              `${[f.idSite, f.nombreSite].filter(Boolean).join(" - ")}${Number(f.correlativo) ? ` · ${f.correlativo}` : ""}`,
+            ]),
         ).entries(),
       )
         .map(([value, label]) => ({ value, label }))
@@ -192,7 +195,7 @@ export default function ReporteResponsablePage() {
     setLookupOperativo({ filtro });
     setIdClienteSel(String(filtro.idCliente));
     setIdProyectoSel(String(filtro.idProyecto));
-    setIdSiteSel(filtro.idSite);
+    setIdSiteSel(`${filtro.idSite}|${Number(filtro.correlativo) || 0}`);
   };
 
   const sugerenciasVisibles = textoResponsable.trim().length >= 2 && modo === "responsables"
@@ -232,7 +235,8 @@ export default function ReporteResponsablePage() {
               modo: "operativo",
               idCliente: Number(idClienteSel),
               idProyecto: idProyectoSel ? Number(idProyectoSel) : undefined,
-              idSite: idSiteSel || undefined,
+              idSite: idSiteSel ? idSiteSel.split("|")[0] : undefined,
+              correSite: idSiteSel ? Number(idSiteSel.split("|")[1]) || undefined : undefined,
             };
     const etiquetaOperativa = [
       clientesOperativo.find((o) => o.value === idClienteSel)?.label,

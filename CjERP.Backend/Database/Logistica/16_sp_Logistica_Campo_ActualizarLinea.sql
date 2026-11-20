@@ -3,7 +3,7 @@
   PV: NO ejecutado en BD. Requiere 09 (sp_Logistica_Campo_Grabar).
   @Campos = lista separada por comas de lo que se cambia: observacion, serie, estado (lo no listado no se toca; asi se puede limpiar un texto).
    - observacion / serie: UPDATE directo de DetSolicitud (solo lineas IdDespacho = 1 en estado 11, pendientes de campo).
-   - estado (14 o 10): ejecuta el flujo completo de sp_Logistica_Campo_Grabar para esa linea (estado, stock, kardex, cabecera);
+   - estado (10, 14 o 19): graba EXACTAMENTE el estado elegido (sin la regla Aplica=0 -> 21) y ejecuta el flujo completo de sp_Logistica_Campo_Grabar para esa linea (estado, stock, kardex, cabecera);
      con 10 la observacion es obligatoria. @Cantidad = cantidad conforme (opcional).
 */
 SET NOCOUNT ON;
@@ -53,8 +53,8 @@ BEGIN
 
     IF EXISTS (SELECT 1 FROM @c WHERE Campo = N'estado')
     BEGIN
-      IF @IdEstado IS NULL OR @IdEstado NOT IN (10, 14)
-        THROW 51313, 'Estado no permitido en campo (use 14 u 10).', 1;
+      IF @IdEstado IS NULL OR @IdEstado NOT IN (10, 14, 19)
+        THROW 51313, 'Estado no permitido en campo (use 14, 10 o 19).', 1;
 
       -- Observacion = la ya guardada en la linea (recien actualizada arriba si se edito en esta llamada).
       DECLARE @items nvarchar(max) = (
@@ -69,7 +69,7 @@ BEGIN
 
       DECLARE @p int, @d int;
       EXEC dbo.sp_Logistica_Campo_Grabar @Items = @items, @Usuario = @Usuario, @IdEmpleadoCj = @IdEmpleadoCj,
-           @IdResponsable = @IdEmpleadoCj, @Procesadas = @p OUTPUT, @ConDiferencia = @d OUTPUT;
+           @IdResponsable = @IdEmpleadoCj, @RespetarEstado = 1, @Procesadas = @p OUTPUT, @ConDiferencia = @d OUTPUT;
     END;
 
     COMMIT TRANSACTION;

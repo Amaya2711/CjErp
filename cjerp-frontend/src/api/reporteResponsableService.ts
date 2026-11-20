@@ -9,7 +9,7 @@ import type { PlanillaConsultaParametro } from "../models/planillaConsulta";
 export type ConsultaPorResponsable =
   | { modo: "responsables"; idResponsables: number[] }
   | { modo: "documento"; nroDocumento: string }
-  | { modo: "operativo"; idCliente: number; idProyecto?: number; idSite?: string };
+  | { modo: "operativo"; idCliente: number; idProyecto?: number; idSite?: string; correSite?: number };
 
 export type RptResponsableRow = {
   tipoRegistro: string;
@@ -162,6 +162,8 @@ export async function consultarOrdenesPorResponsable(
     parametros = [{ nombre: "IdCliente", valor: String(criterio.idCliente), tipo: "int" }];
     if (criterio.idProyecto) parametros.push({ nombre: "IdProyecto", valor: String(criterio.idProyecto), tipo: "int" });
     if (criterio.idSite) parametros.push({ nombre: "IdSite", valor: criterio.idSite, tipo: "string" });
+    // CorreSite distingue sites distintos con el mismo nombre/IdSite (no es el correlativo de la planilla).
+    if (criterio.idSite && criterio.correSite) parametros.push({ nombre: "CorreSite", valor: String(criterio.correSite), tipo: "int" });
   }
 
   const request = {

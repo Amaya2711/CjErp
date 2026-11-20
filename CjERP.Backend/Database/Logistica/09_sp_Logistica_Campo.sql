@@ -96,6 +96,7 @@ CREATE OR ALTER PROCEDURE dbo.sp_Logistica_Campo_Grabar
   @Usuario       nvarchar(50),
   @IdEmpleadoCj  int = NULL,
   @IdResponsable int = NULL,
+  @RespetarEstado bit = 0,   -- 1 = edicion directa de la grilla: se graba el estado elegido (10, 14 o 19) sin la regla Aplica=0 -> 21
   @Procesadas    int OUTPUT,
   @ConDiferencia int OUTPUT
 AS
@@ -124,8 +125,9 @@ BEGIN
                               idEstado int '$.idEstado', cantidad decimal(18,4) '$.cantidad', observacion nvarchar(500) '$.observacion') j;
 
   IF NOT EXISTS (SELECT 1 FROM @j) THROW 51301, 'No hay registros seleccionados.', 1;
-  IF EXISTS (SELECT 1 FROM @j WHERE Estado IS NOT NULL AND Estado NOT IN (10, 14))
-    THROW 51302, 'Estado no permitido en campo (use 14 u 10).', 1;
+  IF EXISTS (SELECT 1 FROM @j WHERE Estado IS NOT NULL AND Estado NOT IN (10, 14)
+             AND NOT (@RespetarEstado = 1 AND Estado = 19))
+    THROW 51302, 'Estado no permitido en campo (use 14, 10 o 19).', 1;
   IF EXISTS (SELECT 1 FROM @j x WHERE NOT EXISTS
              (SELECT 1 FROM dbo.DetSolicitud b WHERE CAST(b.NroSolicitud AS nvarchar(50)) = x.Nro
                 AND CAST(b.Posicion AS nvarchar(20)) = x.Pos AND b.IdDespacho = 1 AND b.IdEstado = 11))
@@ -135,7 +137,8 @@ BEGIN
                   IdCliente, IdProyecto, IdSite, CorreSite, TipoTrabajo, PedidoSap)
   SELECT x.Nro, x.Pos, CAST(b.Correlativo AS nvarchar(50)), CAST(b.CodPap AS nvarchar(50)),
          b.CantSap, ISNULL(x.Cant, b.CantSap), CAST(b.Serie AS nvarchar(100)), COALESCE(x.Obs, CAST(b.Observacion AS nvarchar(500))),
-         CASE WHEN ISNULL(x.Cant, b.CantSap) <> b.CantSap OR x.Estado = 10 THEN 10
+         CASE WHEN @RespetarEstado = 1 AND x.Estado IS NOT NULL THEN x.Estado
+              WHEN ISNULL(x.Cant, b.CantSap) <> b.CantSap OR x.Estado = 10 THEN 10
               WHEN LEFT(CAST(b.CodPap AS nvarchar(50)), 2) NOT IN (N'10', N'40') THEN 21
               ELSE 14 END,
          b.CantSap - ISNULL(x.Cant, b.CantSap),
@@ -205,7 +208,8 @@ BEGIN
       SELECT @cod = CodPap, @conf = Conf, @dif = Dif, @nro = Nro, @pos = Pos, @corr = Corr, @estado = IdEstadoNuevo, @obs = Obs
       FROM @m WHERE Id = @i;
 
-      IF @conf > 0
+      -- Estado 19 (retorno a almacen) elegido a mano: solo cambia el estado, no mueve stock (PV: definir bucket).
+      IF @conf > 0 AND @estado <> 19
       BEGIN
         SET @clave = CONCAT(N'CAMPO:', @nro, N'|', @pos);
         EXEC dbo.sp_Stock_Mover
@@ -215,7 +219,7 @@ BEGIN
           @ClaveIdempotencia = @clave;
       END;
 
-      IF @dif > 0
+      IF @dif > 0 AND @estado <> 19
       BEGIN
         SET @clave = CONCAT(N'CAMPO_DIF:', @nro, N'|', @pos);
         EXEC dbo.sp_Stock_Mover

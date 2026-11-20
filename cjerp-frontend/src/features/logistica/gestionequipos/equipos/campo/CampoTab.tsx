@@ -7,6 +7,7 @@ import { actualizarLineaCampo, consultarCampo, grabarCampo, listarCatalogosSolic
 import type { FiltroOperativoValue } from "../../../../../models/filtroOperativo";
 import type { CampoLinea, SolicitudCatalogo } from "../../../../../models/logisticaEquipos";
 import { getHttpErrorMessage } from "../../../../../utils/httpError";
+import { getConstantesPorCampo } from "../../../../../api/constantesService";
 import { ingresoStyles as styles } from "../ingreso/ingresoComun";
 
 /** Fila de la grilla: la línea del servidor más lo que el usuario edita. */
@@ -19,10 +20,8 @@ type FilaCampo = CampoLinea & {
   obs: string;
 };
 
-const ESTADOS = [
-  { value: 14, label: "CONFORME (x cruzar)" },
-  { value: 10, label: "OBSERVADA" },
-];
+/** Estados de ESTADO_LOG que muestra esta pestaña. */
+const ESTADOS_CAMPO = [10, 14, 19];
 
 const hoyIso = () => new Date().toISOString().slice(0, 10);
 const fechaCorta = (valor: unknown) => String(valor ?? "").slice(0, 10);
@@ -36,6 +35,27 @@ const aFila = (l: CampoLinea): FilaCampo => ({
 
 /** Pestaña "x Campo": conformidad de lo enviado a campo (estado 11 → 14 x cruzar, o 10 observada). */
 export default function CampoTab() {
+  // Estados: sp_Constante_ListarPorCampo @Campo='ESTADO_LOG', solo los códigos de esta pestaña.
+  const [estadosCampo, setEstadosCampo] = useState<{ value: number; label: string }[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    getConstantesPorCampo("ESTADO_LOG")
+      .then((data) => {
+        if (cancelled) return;
+        const opciones = data
+          .map((c) => ({ value: Number(c.correlativo ?? c.codigo), label: (c.valorIni ?? c.descripcion ?? "").trim() }))
+          .filter((o) => ESTADOS_CAMPO.includes(o.value))
+          .map((o) => ({ ...o, label: `${o.value} - ${o.label}` }))
+          .sort((a, b) => a.value - b.value);
+        setEstadosCampo(opciones);
+      })
+      .catch(() => {
+        if (!cancelled) setEstadosCampo([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   const [responsables, setResponsables] = useState<SolicitudCatalogo[]>([]);
   const [usaSolicitudes, setUsaSolicitudes] = useState(false);
   const [solicitudes, setSolicitudes] = useState("");
@@ -155,7 +175,7 @@ export default function CampoTab() {
         await actualizarLineaCampo({ ...base, campos: ["estado"], idEstado, cantidad: fila.cantConforme, observacion: fila.obs.trim() || undefined });
         setFilas((actuales) => actuales.filter((f) => f.clave !== clave));
         setSeleccion((actuales) => actuales.filter((k) => k !== clave));
-        setMensaje(`Solicitud ${fila.nroSolicitud}, posición ${fila.posicion}: ${idEstado === 10 ? "observada" : "conforme (x cruzar)"}.`);
+        setMensaje(`Solicitud ${fila.nroSolicitud}, posición ${fila.posicion}: ${estadosCampo.find((e) => e.value === idEstado)?.label ?? idEstado}.`);
       } catch (err) {
         actualizar(clave, { estadoNuevo: null });
         setError(getHttpErrorMessage(err, "No se pudo grabar el estado."));
@@ -206,16 +226,16 @@ export default function CampoTab() {
 
   const columnasBase = useMemo<GridColumn<FilaCampo>[]>(
     () => [
-      { dataField: "estadoNuevo", caption: "Estado", width: 160, fixed: true, allowEditing: true, lookup: ESTADOS, cellStyle: (v) => (v ? { fontWeight: 700, color: "#1F6F8B" } : { color: "#94A3B8" }) },
-      { dataField: "cantConforme", caption: "Cant. conforme", dataType: "number", width: 110, fixed: true, allowEditing: false },
-      { dataField: "cantSap", caption: "Cant. enviada", dataType: "number", width: 100 },
-      { dataField: "obs", caption: "Observación", width: 240, allowEditing: true },
-      { dataField: "nroSolicitud", caption: "Nro. solicitud", width: 110 },
-      { dataField: "posicion", caption: "Pos.", width: 60 },
+      { dataField: "nroSolicitud", caption: "Nro. solicitud", width: 110, fixed: true },
+      { dataField: "estadoNuevo", caption: "Estado", width: 160, fixed: true, allowEditing: true, lookup: estadosCampo, cellStyle: (v) => (v ? { fontWeight: 700, color: "#1F6F8B" } : { color: "#94A3B8" }) },
       { dataField: "codPap", caption: "Código", width: 110 },
       { dataField: "nombreMaterial", caption: "Material", width: 300 },
       { dataField: "unidadMedida", caption: "UM", width: 60 },
+      { dataField: "cantConforme", caption: "Cant. conforme", dataType: "number", width: 110, allowEditing: false },
+      { dataField: "cantSap", caption: "Cant. enviada", dataType: "number", width: 100 },
       { dataField: "serie", caption: "Serie", width: 140, allowEditing: true },
+      { dataField: "obs", caption: "Observación", width: 240, allowEditing: true },
+      { dataField: "posicion", caption: "Pos.", width: 60 },
       { dataField: "pedidoSap", caption: "Pedido SAP", width: 120 },
       { dataField: "nombreCliente", caption: "Cliente", width: 160 },
       { dataField: "nombreProyecto", caption: "Proyecto", width: 180, groupIndex: 0 },
@@ -225,13 +245,12 @@ export default function CampoTab() {
       { dataField: "nomEstado", caption: "Est. actual", width: 120 },
       { dataField: "fechaCreacion", caption: "Fecha", width: 100, calculateCellValue: (r) => fechaCorta(r.fechaCreacion) },
     ],
-    [],
+    [estadosCampo],
   );
 
-  // DataGridPro deja editable toda columna sin allowEditing:false: aquí solo se editan Observación y Serie
-  // (Estado queda bloqueado hasta definir su condición).
+  // DataGridPro deja editable toda columna sin allowEditing:false: aquí se editan Estado, Observación y Serie.
   const columnas = useMemo<GridColumn<FilaCampo>[]>(
-    () => columnasBase.map((c) => ({ ...c, allowEditing: c.dataField === "obs" || c.dataField === "serie" })),
+    () => columnasBase.map((c) => ({ ...c, allowEditing: c.dataField === "estadoNuevo" || c.dataField === "obs" || c.dataField === "serie" })),
     [columnasBase],
   );
 
@@ -305,7 +324,7 @@ export default function CampoTab() {
           height="fill"
           loading={cargando}
           noDataText="No hay líneas pendientes de conformidad en campo."
-          stateStoringKey="logistica-campo"
+          stateStoringKey="logistica-campo-v2"
           selection="multiple"
           selectedKeys={Array.from(claves)}
           selectionDisabled={guardando}
