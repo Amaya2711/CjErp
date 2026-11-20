@@ -1,7 +1,9 @@
 import { startTransition, useEffect, useMemo, useRef, useState } from "react";
 import type React from "react";
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
-import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, ChevronsLeft, ChevronsRight } from "lucide-react";
+import { ChevronDown, ChevronRight, ChevronUp, Maximize2, Minimize2 } from "lucide-react";
+import DataGridPro from "../../../components/datagrid/DataGridPro";
+import type { GridColumn } from "../../../components/datagrid/types";
 import AppPage from "../../../components/base/AppPage";
 import AppCard from "../../../components/base/AppCard";
 import AppSectionHeader from "../../../components/base/AppSectionHeader";
@@ -13,7 +15,7 @@ import { getHttpErrorMessage } from "../../../utils/httpError";
 
 type RawRow = Record<string, unknown>;
 type MovementType = "Ingreso" | "Egreso" | "Sin tipo";
-type LevelKey = "cliente" | "proyecto" | "site";
+type LevelKey = "cliente" | "proyecto" | "site" | "tipotrabajo" | "tarea";
 
 type MovementRow = {
   fechaRaw: string;
@@ -22,6 +24,8 @@ type MovementRow = {
   cliente: string;
   proyecto: string;
   site: string;
+  tipoTrabajo: string;
+  tarea: string;
   moneda: string;
   monto: number;
   subtotal: number;
@@ -39,7 +43,7 @@ type RankingRow = {
   netoPen: number;
 };
 
-type DetailSortColumn = "fecha" | "tipo" | "cliente" | "proyecto" | "site" | "moneda" | "monto" | "montoPen";
+type DetailGridRow = MovementRow & { id: string; montoBase: number; montoPen: number };
 
 type ProjectCatalogRow = {
   idCliente: number;
@@ -230,6 +234,10 @@ function buildMovementRow(row: RawRow): MovementRow {
     cliente: pickString(row, ["Cliente", "cliente", "NombreCliente", "nombreCliente"]) || "Sin cliente",
     proyecto: pickString(row, ["Proyecto", "proyecto", "NombreProyecto", "nombreProyecto"]) || "Sin proyecto",
     site: pickString(row, ["Site", "site", "NombreSite", "nombreSite", "siteNombre"]) || "Sin site",
+    tipoTrabajo:
+      pickString(row, ["TipoTrabajo", "tipoTrabajo", "Tipo de trabajo", "Tipo_Trabajo", "TipoTrabajoNombre", "tipoTrabajoNombre"]) ||
+      "Sin tipo de trabajo",
+    tarea: pickString(row, ["Tarea", "tarea", "NombreTarea", "nombreTarea", "TareaNombre", "tareaNombre"]) || "Sin tarea",
     moneda: resolveMonedaCode(row),
     monto: Math.max(Math.abs(amountIn), Math.abs(subtotal), Math.abs(movementAmount), Math.abs(signedAmount), 0),
     subtotal,
@@ -285,12 +293,16 @@ function formatCompactSoles(value: number) {
 function getLevelLabel(level: LevelKey) {
   if (level === "cliente") return "Clientes";
   if (level === "proyecto") return "Proyectos";
+  if (level === "tipotrabajo") return "Tipos de trabajo";
+  if (level === "tarea") return "Tareas";
   return "Sites";
 }
 
 function getLevelValue(row: MovementRow, level: LevelKey) {
   if (level === "cliente") return row.cliente;
   if (level === "proyecto") return row.proyecto;
+  if (level === "tipotrabajo") return row.tipoTrabajo;
+  if (level === "tarea") return row.tarea;
   return row.site;
 }
 
@@ -405,16 +417,24 @@ export default function AnalisisPage() {
   const [selectedCliente, setSelectedCliente] = useState("");
   const [selectedProyecto, setSelectedProyecto] = useState("");
   const [selectedSite, setSelectedSite] = useState("");
+  const [selectedTipoTrabajo, setSelectedTipoTrabajo] = useState("");
+  const [selectedTarea, setSelectedTarea] = useState("");
+
+  useEffect(() => {
+    setSelectedTarea("");
+  }, [selectedSite, selectedTipoTrabajo]);
+
+  useEffect(() => {
+    setSelectedTipoTrabajo("");
+  }, [selectedSite]);
   const [winnerScopeLevel, setWinnerScopeLevel] = useState<LevelKey>("cliente");
   const [masterClientes, setMasterClientes] = useState<string[]>([]);
   const [masterProyectos, setMasterProyectos] = useState<ProjectCatalogRow[]>([]);
-  const [detailPage, setDetailPage] = useState(1);
-  const [detailPageSize, setDetailPageSize] = useState(25);
-  const [detailSortColumn, setDetailSortColumn] = useState<DetailSortColumn>("fecha");
-  const [detailSortDirection, setDetailSortDirection] = useState<"asc" | "desc">("desc");
   const [isDetailCollapsed, setIsDetailCollapsed] = useState(true);
+  const [isDetailExpanded, setIsDetailExpanded] = useState(false);
   const isMountedRef = useRef(true);
   const loadRef = useRef(0);
+  const loadedRangeRef = useRef<string | null>(null);
 
   const loadRows = async (overrides?: { fechaInicio?: string; fechaFin?: string; resetSelection?: boolean }) => {
     const fechaInicio = overrides?.fechaInicio ?? draftFechaInicio;
@@ -426,7 +446,7 @@ export default function AnalisisPage() {
     const safeDopRate = Number.isFinite(dopRate) && dopRate > 0 ? dopRate : DEFAULT_EXCHANGE_RATES.DOP;
 
     const request: MovimientoConsultaRequest = {
-      consulta: "movimientos-gastos-ingresos",
+      consulta: "movimientos-analisis",
       parametros: [
         { nombre: "FechaInicio", valor: fechaInicio, tipo: "date" },
         { nombre: "FechaFin", valor: fechaFin, tipo: "date" },
@@ -453,6 +473,7 @@ export default function AnalisisPage() {
       setAppliedUsdExchangeRate(safeUsdRate);
       setAppliedDopExchangeRate(safeDopRate);
       setRawRows(Array.isArray(response.rows) ? response.rows : []);
+      loadedRangeRef.current = `${fechaInicio}|${fechaFin}`;
       if (resetSelection) {
         setSelectedCliente("");
         setSelectedProyecto("");
@@ -577,14 +598,18 @@ export default function AnalisisPage() {
       if (winnerScopeLevel === "cliente" && selectedCliente && row.cliente !== selectedCliente) return false;
       if (winnerScopeLevel !== "site" && selectedProyecto && row.proyecto !== selectedProyecto) return false;
       if (selectedSite && row.site !== selectedSite) return false;
+      if (selectedTipoTrabajo && row.tipoTrabajo !== selectedTipoTrabajo) return false;
+      if (selectedTarea && row.tarea !== selectedTarea) return false;
       return true;
     });
 
     return {
       rows: selectedRows,
     };
-  }, [appliedLookupFiltro, dateFilteredMovements, selectedCliente, selectedProyecto, selectedSite, winnerScopeLevel]);
+  }, [appliedLookupFiltro, dateFilteredMovements, selectedCliente, selectedProyecto, selectedSite, selectedTipoTrabajo, selectedTarea, winnerScopeLevel]);
   const activeLevel: LevelKey = useMemo(() => {
+    if (selectedSite && selectedTipoTrabajo) return "tarea";
+    if (selectedSite) return "tipotrabajo";
     if (winnerScopeLevel === "site") return "site";
     if (winnerScopeLevel === "proyecto") {
       return selectedProyecto ? "site" : "proyecto";
@@ -594,7 +619,7 @@ export default function AnalisisPage() {
     if (selectedProyecto) return "site";
     if (selectedCliente) return "proyecto";
     return "cliente";
-  }, [selectedCliente, selectedProyecto, selectedSite, winnerScopeLevel]);
+  }, [selectedCliente, selectedProyecto, selectedSite, selectedTipoTrabajo, winnerScopeLevel]);
   const currentLevelLabel = getLevelLabel(activeLevel);
   const scopedMovements = scopeSelection.rows;
 
@@ -617,36 +642,52 @@ export default function AnalisisPage() {
     () => aggregateByLevel(scopedMovements, activeLevel, appliedUsdExchangeRate, appliedDopExchangeRate),
     [activeLevel, appliedDopExchangeRate, appliedUsdExchangeRate, scopedMovements],
   );
-  const detailSortedRows = useMemo(() => {
-    const factor = detailSortDirection === "asc" ? 1 : -1;
-
-    return [...scopedMovements].sort((left, right) => {
-      switch (detailSortColumn) {
-        case "fecha":
-          return (left.fechaSort - right.fechaSort) * factor;
-        case "monto":
-          return (left.monto - right.monto) * factor;
-        case "montoPen":
-          return (
-            convertAmountToPen(resolveEgresoBaseAmount(left), left.moneda, appliedUsdExchangeRate, appliedDopExchangeRate) -
-            convertAmountToPen(resolveEgresoBaseAmount(right), right.moneda, appliedUsdExchangeRate, appliedDopExchangeRate)
-          ) * factor;
-        default:
-          return String(left[detailSortColumn]).localeCompare(String(right[detailSortColumn]), "es", {
-            sensitivity: "base",
-          }) * factor;
-      }
-    });
-  }, [appliedDopExchangeRate, appliedUsdExchangeRate, detailSortColumn, detailSortDirection, scopedMovements]);
-  const totalDetailPages = Math.max(1, Math.ceil(detailSortedRows.length / detailPageSize));
-  const visibleDetailRows = useMemo(() => {
-    const startIndex = (detailPage - 1) * detailPageSize;
-    return detailSortedRows.slice(startIndex, startIndex + detailPageSize);
-  }, [detailPage, detailPageSize, detailSortedRows]);
-
-  useEffect(() => {
-    setDetailPage((current) => Math.min(Math.max(1, current), totalDetailPages));
-  }, [totalDetailPages]);
+  const detailGridRows = useMemo<DetailGridRow[]>(
+    () =>
+      [...scopedMovements]
+        .sort((left, right) => right.fechaSort - left.fechaSort)
+        .map((row, index) => {
+          const montoBase = resolveEgresoBaseAmount(row);
+          return {
+            ...row,
+            id: String(index),
+            montoBase,
+            montoPen: convertAmountToPen(montoBase, row.moneda, appliedUsdExchangeRate, appliedDopExchangeRate),
+          };
+        }),
+    [appliedDopExchangeRate, appliedUsdExchangeRate, scopedMovements],
+  );
+  const detailSortedRows = detailGridRows;
+  const detailGridColumns = useMemo<GridColumn<DetailGridRow>[]>(
+    () => [
+      { dataField: "fechaRaw", caption: "Fecha", width: 110, calculateCellValue: (row) => row.fechaRaw || "-", cellStyle: () => ({ fontWeight: 600 }) },
+      { dataField: "tipo", caption: "Tipo", width: 90 },
+      ...(activeLevel === "proyecto" ? [{ dataField: "cliente", caption: "Cliente", minWidth: 160 }] : []),
+      { dataField: "proyecto", caption: "Proyecto", minWidth: 160 },
+      { dataField: "site", caption: "Site", minWidth: 120 },
+      { dataField: "tipoTrabajo", caption: "Tipo de trabajo", minWidth: 150, placeAfter: "site" },
+      { dataField: "tarea", caption: "Tarea", minWidth: 160, placeAfter: "tipoTrabajo" },
+      { dataField: "moneda", caption: "Moneda", width: 90 },
+      {
+        dataField: "montoBase",
+        caption: "Monto",
+        dataType: "number",
+        alignment: "right",
+        width: 130,
+        cellRender: (_v, row) => formatCurrency(row.montoBase, row.moneda),
+      },
+      {
+        dataField: "montoPen",
+        caption: "Monto en PEN",
+        dataType: "number",
+        alignment: "right",
+        width: 140,
+        format: (v) => formatCurrency(Number(v), "PEN"),
+      },
+      { dataField: "detalle", caption: "Detalle", minWidth: 240 },
+    ],
+    [activeLevel],
+  );
 
   const displayRanking = useMemo(() => {
     const byLabel = new Map<string, RankingRow>();
@@ -686,7 +727,10 @@ export default function AnalisisPage() {
               ).values(),
             );
 
+      const normalizedSelectedCliente = winnerScopeLevel === "cliente" ? normalizeText(selectedCliente) : "";
+
       for (const proyecto of sourceProjects) {
+        if (normalizedSelectedCliente && normalizeText(proyecto.nombreCliente) !== normalizedSelectedCliente) continue;
         const normalizedProyecto = normalizeText(proyecto.nombreProyecto);
         const existing = byLabel.get(normalizedProyecto);
         if (existing) {
@@ -703,7 +747,7 @@ export default function AnalisisPage() {
           netoPen: 0,
         });
       }
-    } else {
+    } else if (activeLevel === "site") {
       const siteSourceRows = winnerScopeLevel === "site" ? movements : scopedMovements;
       const sourceSites = siteSourceRows.length > 0 ? Array.from(new Set(siteSourceRows.map((row) => row.site).filter(Boolean))) : [];
 
@@ -838,6 +882,16 @@ export default function AnalisisPage() {
       return;
     }
 
+    if (activeLevel === "tarea") {
+      setSelectedTarea(label);
+      return;
+    }
+
+    if (activeLevel === "tipotrabajo") {
+      setSelectedTipoTrabajo(label);
+      return;
+    }
+
     const resolvedSiteOwner = resolveSiteOwner(label);
     if (resolvedSiteOwner.cliente) {
       setSelectedCliente(resolvedSiteOwner.cliente);
@@ -850,7 +904,6 @@ export default function AnalisisPage() {
 
   const handleApplyFilters = () => {
     setAppliedLookupValue(draftLookupValue);
-    setDetailPage(1);
     if (draftLookupValue?.filtro) {
       setSelectedCliente(draftLookupValue.filtro.nombreCliente ?? "");
       setSelectedProyecto(draftLookupValue.filtro.nombreProyecto ?? "");
@@ -859,6 +912,14 @@ export default function AnalisisPage() {
       setSelectedCliente("");
       setSelectedProyecto("");
       setSelectedSite("");
+    }
+    // Cliente/proyecto/site y tipos de cambio se aplican en el navegador: solo se consulta el SP si cambió el rango de fechas.
+    if (loadedRangeRef.current === `${draftFechaInicio}|${draftFechaFin}`) {
+      const usdRate = Number(draftUsdExchangeRate.replace(",", "."));
+      const dopRate = Number(draftDopExchangeRate.replace(",", "."));
+      setAppliedUsdExchangeRate(Number.isFinite(usdRate) && usdRate > 0 ? usdRate : DEFAULT_EXCHANGE_RATES.USD);
+      setAppliedDopExchangeRate(Number.isFinite(dopRate) && dopRate > 0 ? dopRate : DEFAULT_EXCHANGE_RATES.DOP);
+      return;
     }
     void loadRows({
       fechaInicio: draftFechaInicio,
@@ -898,6 +959,8 @@ export default function AnalisisPage() {
       ...(activeLevel === "proyecto" ? { Cliente: row.cliente } : {}),
       Proyecto: row.proyecto,
       Site: row.site,
+      "Tipo de trabajo": row.tipoTrabajo,
+      Tarea: row.tarea,
       Moneda: row.moneda,
       Monto: formatCurrency(resolveEgresoBaseAmount(row), row.moneda),
       "Monto en PEN": formatCurrency(
@@ -914,11 +977,48 @@ export default function AnalisisPage() {
     );
   };
 
+  const [gridVisibleRows, setGridVisibleRows] = useState<DetailGridRow[] | null>(null);
+  const detailTotalsByMoneda = useMemo(() => {
+    const totals = new Map<string, number>();
+    for (const row of gridVisibleRows ?? detailGridRows) {
+      totals.set(row.moneda, (totals.get(row.moneda) ?? 0) + row.montoBase);
+    }
+    return Array.from(totals.entries()).sort(([left], [right]) => left.localeCompare(right));
+  }, [detailGridRows, gridVisibleRows]);
+
+  const renderDetailGrid = (height: number | string) => (
+    <DataGridPro<DetailGridRow>
+      dataSource={detailGridRows}
+      columns={detailGridColumns}
+      keyExpr="id"
+      height={height}
+      stateStoringKey="analisis_detalle"
+      onVisibleRowsChange={setGridVisibleRows}
+      summary={{ totalItems: [{ column: "montoPen", type: "sum", label: "Total PEN", format: (v) => formatCurrency(v, "PEN") }] }}
+      toolbarExtra={
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", fontSize: 13, fontWeight: 700, color: "#1E293B" }}>
+          <span>Total por moneda:</span>
+          {detailTotalsByMoneda.map(([moneda, total]) => (
+            <span key={moneda} style={{ background: "#EFF6FF", border: "1px solid #BFDBFE", borderRadius: 999, padding: "2px 10px" }}>
+              {moneda}: {formatCurrency(total, moneda)}
+            </span>
+          ))}
+        </div>
+      }
+      showSearchPanel={false}
+      rowAlternation={false}
+      rowPadding="4px 8px"
+      noDataText="No se encontraron movimientos con los filtros aplicados."
+      paging={{ pageSize: 25, pageSizes: [25, 50, 100, 250] }}
+    />
+  );
+
   return (
     <AppPage
       fillHeight
       style={{
         paddingTop: 10,
+        overflowY: isDetailCollapsed ? "hidden" : "auto",
         background:
           "radial-gradient(circle at top left, rgba(37,99,235,0.12), transparent 32%), radial-gradient(circle at top right, rgba(20,184,166,0.12), transparent 28%), linear-gradient(180deg, #F8FAFC 0%, #EEF2FF 100%)",
       }}
@@ -1020,8 +1120,7 @@ export default function AnalisisPage() {
                       onClick={() => {
                         startTransition(() => {
                           setWinnerScopeLevel(level);
-                          setDetailPage(1);
-
+                      
                           if (level === "cliente") {
                             setSelectedCliente("");
                             setSelectedProyecto("");
@@ -1138,7 +1237,21 @@ export default function AnalisisPage() {
                     </button>
                   ) : null}
                   {selectedSite ? <ChevronRight size={14} strokeWidth={2.2} color="#94A3B8" /> : null}
-                  {selectedSite ? <span style={styles.chartBreadcrumbFinal}>{selectedSite}</span> : null}
+                  {selectedSite && !selectedTipoTrabajo ? <span style={styles.chartBreadcrumbFinal}>{selectedSite}</span> : null}
+                  {selectedSite && selectedTipoTrabajo ? (
+                    <button type="button" style={styles.chartBreadcrumbButton} onClick={() => setSelectedTipoTrabajo("")}>
+                      {selectedSite}
+                    </button>
+                  ) : null}
+                  {selectedSite && selectedTipoTrabajo ? <ChevronRight size={14} strokeWidth={2.2} color="#94A3B8" /> : null}
+                  {selectedSite && selectedTipoTrabajo && !selectedTarea ? <span style={styles.chartBreadcrumbFinal}>{selectedTipoTrabajo}</span> : null}
+                  {selectedSite && selectedTipoTrabajo && selectedTarea ? (
+                    <button type="button" style={styles.chartBreadcrumbButton} onClick={() => setSelectedTarea("")}>
+                      {selectedTipoTrabajo}
+                    </button>
+                  ) : null}
+                  {selectedSite && selectedTipoTrabajo && selectedTarea ? <ChevronRight size={14} strokeWidth={2.2} color="#94A3B8" /> : null}
+                  {selectedSite && selectedTipoTrabajo && selectedTarea ? <span style={styles.chartBreadcrumbFinal}>{selectedTarea}</span> : null}
                 </div>
               </div>
               <div style={styles.chartLegendLayout}>
@@ -1174,7 +1287,8 @@ export default function AnalisisPage() {
                         style={
                           (activeLevel === "cliente" && normalizeText(selectedCliente) === normalizeText(item.label)) ||
                           (activeLevel === "proyecto" && normalizeText(selectedProyecto) === normalizeText(item.label)) ||
-                          (activeLevel === "site" && normalizeText(selectedSite) === normalizeText(item.label))
+                          (activeLevel === "tipotrabajo" && normalizeText(selectedTipoTrabajo) === normalizeText(item.label)) ||
+                          (activeLevel === "tarea" && normalizeText(selectedTarea) === normalizeText(item.label))
                             ? styles.legendItemSelected
                             : styles.legendItem
                         }
@@ -1229,11 +1343,21 @@ export default function AnalisisPage() {
                   type="button"
                   style={styles.exportButton}
                   onClick={handleExportVisibleMovements}
-                  disabled={visibleDetailRows.length === 0}
+                  disabled={detailSortedRows.length === 0}
                   title="Exportar"
                   aria-label="Exportar"
                 >
                   Exportar
+                </button>
+                <button
+                  type="button"
+                  style={styles.exportButton}
+                  onClick={() => setIsDetailExpanded(true)}
+                  disabled={detailSortedRows.length === 0}
+                  title="Expandir detalle de movimientos en pantalla grande"
+                  aria-label="Expandir detalle de movimientos en pantalla grande"
+                >
+                  <Maximize2 size={16} strokeWidth={2.4} />
                 </button>
                 <button
                   type="button"
@@ -1250,142 +1374,30 @@ export default function AnalisisPage() {
             {isDetailCollapsed ? null : !detailSortedRows.length ? (
               <AppStatusMessage tone="info">No se encontraron movimientos con los filtros aplicados.</AppStatusMessage>
             ) : (
-              <div style={styles.detailTableWrap}>
-                <div style={styles.detailTablePager}>
-                  <div style={styles.tablePagerInfo}>
-                    Mostrando {detailSortedRows.length === 0 ? 0 : (detailPage - 1) * detailPageSize + 1}-
-                    {Math.min(detailPage * detailPageSize, detailSortedRows.length)} de {detailSortedRows.length}
-                  </div>
-                  <div style={styles.tablePagerControls}>
-                    <label style={styles.pageSizeLabel}>
-                      Filas por pagina
-                      <select
-                        style={styles.pageSizeSelect}
-                        value={detailPageSize}
-                        onChange={(event) => {
-                          setDetailPageSize(Number(event.target.value));
-                          setDetailPage(1);
-                        }}
-                      >
-                        {[25, 50, 100].map((size) => (
-                          <option key={size} value={size}>
-                            {size}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <button
-                      type="button"
-                      style={styles.secondaryButton}
-                      onClick={() => setDetailPage(1)}
-                      disabled={detailPage === 1}
-                      aria-label="Primera pagina"
-                      title="Primera pagina"
-                    >
-                      <ChevronsLeft size={16} />
-                    </button>
-                    <button
-                      type="button"
-                      style={styles.secondaryButton}
-                      onClick={() => setDetailPage((current) => Math.max(1, current - 1))}
-                      disabled={detailPage === 1}
-                      aria-label="Pagina anterior"
-                      title="Pagina anterior"
-                    >
-                      <ChevronLeft size={16} />
-                    </button>
-                    <span style={styles.tablePagerPage}>
-                      Pagina {detailPage} de {totalDetailPages}
-                    </span>
-                    <button
-                      type="button"
-                      style={styles.secondaryButton}
-                      onClick={() => setDetailPage((current) => Math.min(totalDetailPages, current + 1))}
-                      disabled={detailPage === totalDetailPages}
-                      aria-label="Pagina siguiente"
-                      title="Pagina siguiente"
-                    >
-                      <ChevronRight size={16} />
-                    </button>
-                    <button
-                      type="button"
-                      style={styles.secondaryButton}
-                      onClick={() => setDetailPage(totalDetailPages)}
-                      disabled={detailPage === totalDetailPages}
-                      aria-label="Ultima pagina"
-                      title="Ultima pagina"
-                    >
-                      <ChevronsRight size={16} />
-                    </button>
-                  </div>
-                </div>
-                <div style={styles.tableWrap}>
-                  <div style={styles.tableScroll}>
-                    <table style={styles.table}>
-                      <thead>
-                        <tr>
-                          {[
-                            ["fecha", "Fecha"],
-                            ["tipo", "Tipo"],
-                            ...(activeLevel === "proyecto" ? ([["cliente", "Cliente"]] as Array<[string, string]>) : []),
-                            ["proyecto", "Proyecto"],
-                            ["site", "Site"],
-                            ["moneda", "Moneda"],
-                            ["monto", "Monto"],
-                            ["montoPen", "Monto en PEN"],
-                            ["detalle", "Detalle"],
-                          ].map(([column, label]) => {
-                            const isActive = detailSortColumn === column;
-                            const icon = isActive ? (detailSortDirection === "asc" ? "Ã¢â€“Â²" : "Ã¢â€“Â¼") : "";
-                            return (
-                              <th key={column} style={styles.th}>
-                                <button
-                                  type="button"
-                                  style={styles.thButton}
-                                  onClick={() => {
-                                    setDetailPage(1);
-                                    setDetailSortColumn((current) => {
-                                      if (current === column) {
-                                        setDetailSortDirection((direction) => (direction === "asc" ? "desc" : "asc"));
-                                        return current;
-                                      }
-                                      setDetailSortDirection("asc");
-                                      return column as DetailSortColumn;
-                                    });
-                                  }}
-                                >
-                                  {label} {icon}
-                                </button>
-                              </th>
-                            );
-                          })}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {visibleDetailRows.map((row, index) => (
-                          <tr key={`${row.fechaRaw}-${row.cliente}-${row.proyecto}-${row.site}-${index}`}>
-                            <td style={styles.tdStrong}>{row.fechaRaw || "-"}</td>
-                            <td style={styles.td}>{row.tipo}</td>
-                            {activeLevel === "proyecto" ? <td style={styles.td}>{row.cliente}</td> : null}
-                            <td style={styles.td}>{row.proyecto}</td>
-                            <td style={styles.td}>{row.site}</td>
-                            <td style={styles.td}>{row.moneda}</td>
-                            <td style={styles.tdStrong}>{formatCurrency(resolveEgresoBaseAmount(row), row.moneda)}</td>
-                            <td style={styles.tdStrong}>
-                              {formatCurrency(convertAmountToPen(resolveEgresoBaseAmount(row), row.moneda, appliedUsdExchangeRate, appliedDopExchangeRate), "PEN")}
-                            </td>
-                            <td style={styles.td}>{row.detalle}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              </div>
+              isDetailExpanded ? null : renderDetailGrid("60vh")
             )}
           </AppCard>
         </>
       )}
+      {isDetailExpanded ? (
+        <div style={styles.expandOverlay} onClick={() => setIsDetailExpanded(false)}>
+          <div style={styles.expandPanel} onClick={(event) => event.stopPropagation()}>
+            <div style={styles.detailHeaderCompact}>
+              <h2 style={styles.detailHeaderTitle}>{`Detalle de movimientos (${detailSortedRows.length})`}</h2>
+              <button
+                type="button"
+                style={styles.exportButton}
+                onClick={() => setIsDetailExpanded(false)}
+                title="Cerrar vista expandida"
+                aria-label="Cerrar vista expandida"
+              >
+                <Minimize2 size={16} strokeWidth={2.4} />
+              </button>
+            </div>
+            <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>{renderDetailGrid("fill")}</div>
+          </div>
+        </div>
+      ) : null}
     </AppPage>
   );
 }
@@ -1403,44 +1415,36 @@ function RankingTable({
   showClient?: boolean;
   showProject?: boolean;
 }) {
+  const columns: GridColumn<RankingRow>[] = [
+    { dataField: "label", caption: "Nivel", minWidth: 180, cellStyle: () => ({ fontWeight: 700 }) },
+    ...(showClient ? [{ dataField: "cliente", caption: "Cliente", minWidth: 160, calculateCellValue: (row: RankingRow) => row.cliente || "-" }] : []),
+    ...(showProject ? [{ dataField: "proyecto", caption: "Proyecto", minWidth: 160, calculateCellValue: (row: RankingRow) => row.proyecto || "-" }] : []),
+    { dataField: "ingresosPen", caption: "Ingresos", dataType: "number", alignment: "right", format: (v) => formatCurrency(Number(v), "PEN") },
+    { dataField: "egresosPen", caption: "Egresos", dataType: "number", alignment: "right", format: (v) => formatCurrency(Number(v), "PEN") },
+    {
+      dataField: "mainValue",
+      caption: kind === "ingreso" ? "Ingresos" : kind === "egreso" ? "Egresos" : "Neto",
+      dataType: "number",
+      alignment: "right",
+      calculateCellValue: (row) => (kind === "ingreso" ? row.ingresosPen : kind === "egreso" ? row.egresosPen : row.netoPen),
+      format: (v) => formatCurrency(Number(v), "PEN"),
+      cellStyle: (v) => ({ fontWeight: 700, color: Number(v) >= 0 ? "#14532D" : "#7F1D1D" }),
+    },
+  ];
+
   return (
-    <div style={styles.tableWrap}>
-      <div style={styles.tableScroll}>
-        <table style={styles.table}>
-          <thead>
-            <tr>
-              <th style={styles.th}>Nivel</th>
-              {showClient ? <th style={styles.th}>Cliente</th> : null}
-              {showProject ? <th style={styles.th}>Proyecto</th> : null}
-              <th style={styles.thRight}>Ingresos</th>
-              <th style={styles.thRight}>Egresos</th>
-              <th style={styles.thRight}>{kind === "ingreso" ? "Ingresos" : kind === "egreso" ? "Egresos" : "Neto"}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row) => {
-              const mainValue = kind === "ingreso" ? row.ingresosPen : kind === "egreso" ? row.egresosPen : row.netoPen;
-              return (
-                <tr
-                  key={row.label}
-                  style={onRowClick ? styles.clickableRow : undefined}
-                onClick={onRowClick ? () => onRowClick(row) : undefined}
-                >
-                  <td style={styles.tdStrong}>{row.label}</td>
-                  {showClient ? <td style={styles.td}>{row.cliente || "-"}</td> : null}
-                  {showProject ? <td style={styles.td}>{row.proyecto || "-"}</td> : null}
-                  <td style={styles.tdRight}>{formatCurrency(row.ingresosPen, "PEN")}</td>
-                  <td style={styles.tdRight}>{formatCurrency(row.egresosPen, "PEN")}</td>
-                  <td style={{ ...styles.tdRight, fontWeight: 700, color: mainValue >= 0 ? "#14532D" : "#7F1D1D" }}>
-                    {formatCurrency(mainValue, "PEN")}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-    </div>
+    <DataGridPro<RankingRow>
+      dataSource={rows}
+      columns={columns}
+      keyExpr="label"
+      height={360}
+      showSearchPanel={false}
+      rowAlternation={false}
+      rowPadding="4px 8px"
+      paging={{ pageSize: 25, pageSizes: [25, 50, 100] }}
+      onRowClick={onRowClick}
+      rowStyle={onRowClick ? () => ({ cursor: "pointer" }) : undefined}
+    />
   );
 }
 
@@ -1483,6 +1487,27 @@ const styles: Record<string, React.CSSProperties> = {
     fontWeight: 700,
     padding: "0 16px",
     cursor: "pointer",
+  },
+  expandOverlay: {
+    position: "fixed",
+    inset: 0,
+    background: "rgba(15,23,42,0.55)",
+    zIndex: 1000,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  expandPanel: {
+    width: "96vw",
+    height: "92vh",
+    background: "#fff",
+    borderRadius: 18,
+    padding: 16,
+    display: "flex",
+    flexDirection: "column",
+    gap: 10,
+    boxShadow: "0 24px 60px rgba(15,23,42,0.35)",
+    overflow: "hidden",
   },
   exportButton: {
     height: 40,

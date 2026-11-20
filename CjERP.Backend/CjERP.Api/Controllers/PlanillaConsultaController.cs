@@ -130,6 +130,7 @@ namespace CjERP.Api.Controllers
                     : string.Equals(consulta, "importar-consulta-dsh", StringComparison.OrdinalIgnoreCase)
                             ? RequiredParametersImportarConsultaDsh
                 : string.Equals(consulta, "movimientos-gastos-ingresos", StringComparison.OrdinalIgnoreCase)
+                            || string.Equals(consulta, "movimientos-analisis", StringComparison.OrdinalIgnoreCase)
                             ? RequiredParametersMovimientosGastosIngresos
                  : string.Equals(consulta, "importar-resumen-ot", StringComparison.OrdinalIgnoreCase)
                             ? (providedNames.Contains("OT")
@@ -660,6 +661,7 @@ namespace CjERP.Api.Controllers
                 "importar-consulta-dsh" => "sp_Importar_ConsultaDsh",
                 "importar-resumen-ot" => "sp_Importar_ResumenOT",
                 "movimientos-gastos-ingresos" => "sp_Movimientos_Consulta_GastosIngresos",
+                "movimientos-analisis" => "sp_Movimientos_Analisis",
                 "clientes-activos" => "clientes-activos",
                 "proyectos-activos" => "proyectos-activos",
                 _ => "sp_Planilla_Consulta_Estados"

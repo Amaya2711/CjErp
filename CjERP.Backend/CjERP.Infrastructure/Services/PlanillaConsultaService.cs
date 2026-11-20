@@ -33,6 +33,7 @@ namespace CjERP.Infrastructure.Services
         private const string StoredProcedurePlanillaOtResumen = "dbo.sp_Planilla_OT_Resumen";
         private const string StoredProcedurePlanillaOcResumen = "dbo.sp_Planilla_OC_Resumen";
         private const string StoredProcedureMovimientosGastosIngresos = "dbo.sp_Movimientos_Consulta_GastosIngresos";
+        private const string StoredProcedureMovimientosAnalisis = "dbo.sp_Movimientos_Analisis";
         private const string StoredProcedureGastosPagados = "dbo.sp_Planilla_Consulta_Gastos_Pagados";
         private const string StoredProcedureAnalisisGastos = "dbo.sp_OrdenCompra_Consulta_Estados";
         private const string StoredProcedurePlanillaPorOt = "dbo.sp_Planilla_ConsultarPorOT";
@@ -454,6 +455,7 @@ namespace CjERP.Infrastructure.Services
                 "planilla-ot-resumen" => StoredProcedurePlanillaOtResumen,
                 "planilla-oc-resumen" => StoredProcedurePlanillaOcResumen,
                 "movimientos-gastos-ingresos" => StoredProcedureMovimientosGastosIngresos,
+                "movimientos-analisis" => StoredProcedureMovimientosAnalisis,
                 "analisis-gastos" => StoredProcedureAnalisisGastos,
                 "planilla-por-ot" => StoredProcedurePlanillaPorOt,
                 "pagos-v1-resumen" => StoredProcedureEstadosResumen,
