@@ -251,6 +251,23 @@ export default function SeguridadPermisosAccionesPage() {
       ];
     }
 
+    const esPaginaCompensacion = form.rutaPagina.endsWith("/recursoshumanos/compensacionreal");
+
+    if (form.tipoElemento === "tab" && esPaginaCompensacion) {
+      return [
+        { value: "tab.solicitudes", label: "Listado de compensaciones solicitadas" },
+        { value: "tab.resumen", label: "Resumen de compensaciones pendientes" },
+      ];
+    }
+
+    if (form.tipoElemento === "button" && esPaginaCompensacion) {
+      return [
+        { value: "button.primer_aprobador", label: "1er aprobador" },
+        { value: "button.segundo_aprobador", label: "2do aprobador" },
+        { value: "button.rechazar", label: "Rechazar" },
+      ];
+    }
+
     if (form.tipoElemento === "system") {
       return [{ value: "system.access", label: "Acceso general a la pagina" }];
     }

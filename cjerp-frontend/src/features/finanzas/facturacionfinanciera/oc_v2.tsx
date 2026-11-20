@@ -2830,7 +2830,13 @@ export default function OcV2Page() {
   const validateDraft = () => {
     const gestorEfectivo = draft.gestor || draft.validador || draft.responsable;
     if (!draft.solicitante || !gestorEfectivo || !draft.validador || !draft.responsable) {
-      setError("Complete solicitante, gestor, validador y responsable.");
+      const faltantes = [
+        !draft.solicitante ? "solicitante" : "",
+        !gestorEfectivo ? "gestor" : "",
+        !draft.validador ? "validador" : "",
+        !draft.responsable ? "responsable (elija una opción de la lista)" : "",
+      ].filter(Boolean);
+      setError(`Complete: ${faltantes.join(", ")}.`);
       return false;
     }
 

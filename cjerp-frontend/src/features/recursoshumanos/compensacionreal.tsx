@@ -23,9 +23,11 @@ import type {
   ProcesarCompensacionRequest,
 } from "../../models/compensacion";
 import type { EmpleadoCta } from "../../models/empleadoCta";
-import { getAuthUser } from "../../utils/authStorage";
+import { getAuthUser, hasFullPageActionAccess } from "../../utils/authStorage";
+import { seguridadPermisosAccionesService } from "../seguridad/services/seguridadPermisosAccionesService";
 import { getHttpErrorMessage } from "../../utils/httpError";
 
+const RUTA_PAGINA = "/recursoshumanos/compensacionreal";
 const LIMA_TIME_ZONE = "America/Lima";
 const limaDateFormatter = new Intl.DateTimeFormat("en-CA", {
   timeZone: LIMA_TIME_ZONE,
@@ -466,6 +468,57 @@ export default function CompensacionRealPage() {
   const [procesarError, setProcesarError] = useState("");
   const [procesandoAccion, setProcesandoAccion] = useState(false);
   const [estadoDropdownOpen, setEstadoDropdownOpen] = useState(false);
+  // Todo está activo por defecto; una fila activa del usuario con "ver" o "ejecutar" en NO bloquea ese elemento.
+  const [bloqueados, setBloqueados] = useState<Set<string>>(() => new Set());
+  const bloqueado = (clave: string) => bloqueados.has(clave);
+
+  useEffect(() => {
+    const authUser = getAuthUser();
+    if (hasFullPageActionAccess(authUser)) {
+      return;
+    }
+
+    // SegPermisoAccion referencia EmpleadoCj (codEmp en sesión); algunas sesiones traen además un IdEmpleado alterno.
+    const ids = [...new Set([authUser?.codEmp, authUser?.idEmpleado]
+      .map((value) => Math.trunc(Number(value ?? 0)))
+      .filter((value) => Number.isFinite(value) && value > 0))];
+    let cancelled = false;
+
+    async function cargarRestricciones() {
+      try {
+        const conjuntos = await Promise.all(
+          ids.map((idEmpleado) =>
+            seguridadPermisosAccionesService.listar({ rutaPagina: RUTA_PAGINA, idEmpleado })
+          )
+        );
+        if (cancelled) return;
+
+        const restringidos = new Set<string>();
+        conjuntos.flat().forEach((permiso) => {
+          const clave = permiso.claveAccion?.trim().toLowerCase();
+          if (clave && permiso.idEmpleado && permiso.esActivo && (!permiso.puedeVer || !permiso.puedeEjecutar)) {
+            restringidos.add(clave);
+          }
+        });
+        setBloqueados(restringidos);
+      } catch {
+        // Sin acceso a la tabla de permisos no se bloquea nada.
+      }
+    }
+
+    void cargarRestricciones();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (activeTab === "solicitudes" && bloqueados.has("tab.solicitudes") && !bloqueados.has("tab.resumen")) {
+      setActiveTab("resumen");
+    } else if (activeTab === "resumen" && bloqueados.has("tab.resumen") && !bloqueados.has("tab.solicitudes")) {
+      setActiveTab("solicitudes");
+    }
+  }, [activeTab, bloqueados]);
   const estadoDropdownRef = useRef<HTMLDivElement | null>(null);
 
   const api = useMemo(
@@ -959,28 +1012,32 @@ export default function CompensacionRealPage() {
 
         return (
           <div style={styles.actions}>
-            <button
-              type="button"
-              style={{
-                ...styles.secondaryButton,
-                ...(disableFirstApproverButton ? styles.secondaryButtonDisabled : {}),
-              }}
-              onClick={() => handleOpenProcesar("PRIMER_APROBADOR", item)}
-              disabled={disableFirstApproverButton}
-            >
-              1er aprobador
-            </button>
-            <button
-              type="button"
-              style={{
-                ...styles.secondaryButton,
-                ...(disableSecondApproverButton ? styles.secondaryButtonDisabled : {}),
-              }}
-              onClick={() => handleOpenProcesar("SEGUNDO_APROBADOR", item)}
-              disabled={disableSecondApproverButton}
-            >
-              2do aprobador
-            </button>
+            {!bloqueado("button.primer_aprobador") ? (
+              <button
+                type="button"
+                style={{
+                  ...styles.secondaryButton,
+                  ...(disableFirstApproverButton ? styles.secondaryButtonDisabled : {}),
+                }}
+                onClick={() => handleOpenProcesar("PRIMER_APROBADOR", item)}
+                disabled={disableFirstApproverButton}
+              >
+                1er aprobador
+              </button>
+            ) : null}
+            {!bloqueado("button.segundo_aprobador") ? (
+              <button
+                type="button"
+                style={{
+                  ...styles.secondaryButton,
+                  ...(disableSecondApproverButton ? styles.secondaryButtonDisabled : {}),
+                }}
+                onClick={() => handleOpenProcesar("SEGUNDO_APROBADOR", item)}
+                disabled={disableSecondApproverButton}
+              >
+                2do aprobador
+              </button>
+            ) : null}
             {SHOW_EDIT_BUTTON ? (
               <button
                 type="button"
@@ -994,17 +1051,19 @@ export default function CompensacionRealPage() {
                 Editar
               </button>
             ) : null}
-            <button
-              type="button"
-              style={{
-                ...styles.dangerButton,
-                ...(disableRejectButton ? styles.secondaryButtonDisabled : {}),
-              }}
-              onClick={() => handleOpenProcesar("RECHAZAR", item)}
-              disabled={disableRejectButton}
-            >
-              Rechazar
-            </button>
+            {!bloqueado("button.rechazar") ? (
+              <button
+                type="button"
+                style={{
+                  ...styles.dangerButton,
+                  ...(disableRejectButton ? styles.secondaryButtonDisabled : {}),
+                }}
+                onClick={() => handleOpenProcesar("RECHAZAR", item)}
+                disabled={disableRejectButton}
+              >
+                Rechazar
+              </button>
+            ) : null}
           </div>
         );
       },
@@ -1254,26 +1313,30 @@ export default function CompensacionRealPage() {
 
 
       <div style={styles.tabBar}>
-        <button
-          type="button"
-          style={{
-            ...styles.tabButton,
-            ...(activeTab === "solicitudes" ? styles.tabButtonActive : {}),
-          }}
-          onClick={() => setActiveTab("solicitudes")}
-        >
-          Listado de compensaciones solicitadas
-        </button>
-        <button
-          type="button"
-          style={{
-            ...styles.tabButton,
-            ...(activeTab === "resumen" ? styles.tabButtonActive : {}),
-          }}
-          onClick={() => setActiveTab("resumen")}
-        >
-          Resumen de compensaciones pendientes
-        </button>
+        {!bloqueado("tab.solicitudes") ? (
+          <button
+            type="button"
+            style={{
+              ...styles.tabButton,
+              ...(activeTab === "solicitudes" ? styles.tabButtonActive : {}),
+            }}
+            onClick={() => setActiveTab("solicitudes")}
+          >
+            Listado de compensaciones solicitadas
+          </button>
+        ) : null}
+        {!bloqueado("tab.resumen") ? (
+          <button
+            type="button"
+            style={{
+              ...styles.tabButton,
+              ...(activeTab === "resumen" ? styles.tabButtonActive : {}),
+            }}
+            onClick={() => setActiveTab("resumen")}
+          >
+            Resumen de compensaciones pendientes
+          </button>
+        ) : null}
       </div>
 
       {activeTab === "solicitudes" ? (
