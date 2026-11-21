@@ -309,3 +309,25 @@ export type ParsedConciliacionExcelFile = {
   saldoContable?: string | null;
   clientError: string;
 };
+
+export interface IngresoPendiente {
+  idMovimientoBanco: number;
+  idBanco: number;
+  codigoBanco?: string | null;
+  empresa?: string | null;
+  cuenta?: string | null;
+  moneda?: string | null;
+  fecha?: string | null;
+  nroOperacion?: string | null;
+  descripcionOperacion?: string | null;
+  monto: number;
+  saldoPorAplicar: number;
+  areaFlujo?: string | null;
+  fechaConciliacion?: string | null;
+  usuarioConciliacion?: string | null;
+}
+
+export interface IngresosPendientesResponse {
+  ingresos: IngresoPendiente[];
+  total: number;
+}

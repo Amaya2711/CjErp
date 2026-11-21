@@ -41,6 +41,12 @@ public interface IConciliacionBcpService
         string? usuario,
         CancellationToken cancellationToken = default);
 
+    Task<IngresosPendientesResponseDto> ObtenerIngresosPendientesAsync(
+        DateTime? fechaInicio,
+        DateTime? fechaFin,
+        string? codigoBanco,
+        CancellationToken cancellationToken = default);
+
     Task<ConciliacionBcpClasificacionCombosResponseDto> ObtenerCombosClasificacionAsync(
         CancellationToken cancellationToken = default);
 

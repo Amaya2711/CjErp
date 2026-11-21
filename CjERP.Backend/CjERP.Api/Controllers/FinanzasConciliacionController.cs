@@ -398,6 +398,39 @@ public sealed class FinanzasConciliacionController : ControllerBase
         }
     }
 
+    [HttpGet("ingresos-pendientes")]
+    public async Task<IActionResult> ObtenerIngresosPendientes(
+        [FromQuery] DateTime? fechaInicio,
+        [FromQuery] DateTime? fechaFin,
+        [FromQuery] string? codigoBanco,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var response = await _conciliacionBcpService.ObtenerIngresosPendientesAsync(
+                fechaInicio,
+                fechaFin,
+                codigoBanco,
+                cancellationToken);
+
+            return Ok(new
+            {
+                success = true,
+                message = "Ingresos pendientes cargados correctamente.",
+                data = response
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[FinanzasConciliacionController] Error al cargar ingresos pendientes.");
+            return StatusCode(500, new
+            {
+                success = false,
+                message = "Ocurrio un error al cargar los ingresos pendientes."
+            });
+        }
+    }
+
     [HttpGet("clasificacion/combos")]
     public async Task<IActionResult> ObtenerCombosClasificacion(CancellationToken cancellationToken)
     {

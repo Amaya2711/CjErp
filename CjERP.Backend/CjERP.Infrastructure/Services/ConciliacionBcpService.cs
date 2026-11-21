@@ -588,6 +588,27 @@ ORDER BY rc.IdAreaFlujo, rc.IdReferencia, rc.IdCuentaContable, rc.Orden, rc.IdRe
                     commandTimeout: 300)))
             .ToList();
 
+        // BBVA e Interbank se concilian de forma aislada. BCP/Scotiabank mantienen su comportamiento
+        // historico: no ven movimientos de BBVA ni Interbank.
+        if (IsBbvaCode(request.CodigoBanco))
+        {
+            movimientos = movimientos
+                .Where(item => IsBbvaCode(item.CodigoBanco))
+                .ToList();
+        }
+        else if (IsInterbankCode(request.CodigoBanco))
+        {
+            movimientos = movimientos
+                .Where(item => IsInterbankCode(item.CodigoBanco))
+                .ToList();
+        }
+        else
+        {
+            movimientos = movimientos
+                .Where(item => !IsBbvaCode(item.CodigoBanco) && !IsInterbankCode(item.CodigoBanco))
+                .ToList();
+        }
+
         var rangoFechasBusqueda = ResolveConciliationDateRange(
             request.FechaInicio?.Date,
             request.FechaFin?.Date,
@@ -1111,6 +1132,66 @@ ORDER BY rc.IdAreaFlujo, rc.IdReferencia, rc.IdCuentaContable, rc.Orden, rc.IdRe
 
         movimiento.Comentario = comentarioNuevo;
         return BuildConciliacionRegistroActualizado(movimiento, comentarioNuevo);
+    }
+
+    public async Task<IngresosPendientesResponseDto> ObtenerIngresosPendientesAsync(
+        DateTime? fechaInicio,
+        DateTime? fechaFin,
+        string? codigoBanco,
+        CancellationToken cancellationToken = default)
+    {
+        // Ingreso pendiente = movimiento conciliado, Monto > 0, Area Flujo "INGRESOS OP" y saldo por aplicar > 0.
+        // Aun no existe la tabla de aplicaciones a facturas, por eso el saldo por aplicar es el Monto completo.
+        // Solo lectura: no modifica MovimientosConciliacion.
+        const string sql = @"
+SELECT
+    m.IdMovimientoBanco,
+    m.IdBanco,
+    m.CodigoBanco,
+    m.Empresa,
+    m.Cuenta,
+    m.Moneda,
+    m.Fecha,
+    m.NroOperacion,
+    m.DescripcionOperacion,
+    m.Monto,
+    m.Monto AS SaldoPorAplicar,
+    af.NombreAreaFlujo AS AreaFlujo,
+    m.FechaConciliacion,
+    m.UsuarioConciliacion
+FROM dbo.MovimientosConciliacion m
+INNER JOIN dbo.ConciliacionAreaFlujo af ON af.IdAreaFlujo = m.IdAreaFlujo
+WHERE m.IdActivo = 1
+  AND m.EsConciliado = 1
+  AND m.Monto > 0
+  AND UPPER(LTRIM(RTRIM(af.NombreAreaFlujo))) = 'INGRESOS OP'
+  AND (@FechaInicio IS NULL OR m.Fecha >= @FechaInicio)
+  AND (@FechaFin IS NULL OR m.Fecha <= @FechaFin)
+  AND (@CodigoBanco IS NULL OR m.CodigoBanco = @CodigoBanco)
+ORDER BY m.Fecha DESC, m.IdMovimientoBanco DESC;";
+
+        await using var connection = _sqlCommandFactory.CreateConnection();
+        await connection.OpenAsync(cancellationToken);
+
+        var ingresos = (await connection.QueryAsync<IngresoPendienteDto>(
+                _sqlCommandFactory.Create(
+                    sql,
+                    new
+                    {
+                        FechaInicio = fechaInicio?.Date,
+                        FechaFin = fechaFin?.Date,
+                        CodigoBanco = string.IsNullOrWhiteSpace(codigoBanco) ? null : codigoBanco.Trim()
+                    },
+                    CommandType.Text,
+                    cancellationToken)))
+            .Where(item => item.SaldoPorAplicar > 0)
+            .ToList();
+
+        return new IngresosPendientesResponseDto
+        {
+            Ingresos = ingresos,
+            Total = ingresos.Count
+        };
     }
 
     public async Task<ConciliacionBcpClasificacionCombosResponseDto> ObtenerCombosClasificacionAsync(
@@ -2635,6 +2716,17 @@ ORDER BY ic.key_ordinal;";
         string? codigoBanco,
         CancellationToken cancellationToken)
     {
+        // BBVA tiene una plantilla fija: se interpreta de forma deterministica, sin OpenAI.
+        if (IsBbvaCode(codigoBanco))
+        {
+            return AnalyzeBbvaFile(archivo, usuario, codigoBanco);
+        }
+
+        if (IsInterbankCode(codigoBanco))
+        {
+            return AnalyzeInterbankFile(archivo, usuario, codigoBanco);
+        }
+
         if (!HasOpenAiConfiguration())
         {
             throw new InvalidOperationException(
@@ -3967,6 +4059,581 @@ ORDER BY ic.key_ordinal;";
         return normalized.Contains("bcp", StringComparison.OrdinalIgnoreCase);
     }
 
+    private static bool IsBbvaCode(string? codigoBanco)
+    {
+        var normalized = NormalizeKey(codigoBanco);
+        return normalized.Contains("bbva", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsInterbankCode(string? codigoBanco)
+    {
+        var normalized = NormalizeKey(codigoBanco);
+        return normalized.Contains("interbank", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static decimal? TryParseInterbankAmount(string? value)
+    {
+        var text = NormalizeText(value);
+        if (text is null)
+        {
+            return null;
+        }
+
+        // Quita el simbolo de moneda: "S/ -1,935.20", "$ -300.00", "US$ 10.00".
+        text = Regex.Replace(text, @"(US\$|S/\.?|\$)", string.Empty, RegexOptions.IgnoreCase)
+            .Replace(' ', ' ')
+            .Trim();
+
+        return text.Length == 0 ? null : TryParseBbvaAmount(text);
+    }
+
+    private ConciliacionBcpAnalizarArchivoResponseDto AnalyzeInterbankFile(
+        ConciliacionBcpArchivoMuestraDto archivo,
+        string? usuario,
+        string? codigoBanco)
+    {
+        var matrix = archivo.Filas
+            .Where(row => row is not null)
+            .Select(row => row.Select(cell => cell?.Trim() ?? string.Empty).ToList())
+            .ToList();
+
+        // 1. Fila de titulos: Fecha de operacion | Fecha de proceso | Nro. de operacion | Movimiento |
+        //    Descripcion | Canal | Cargo | Abono | Saldo contable
+        var headerRowIndex = -1;
+        var columns = new Dictionary<string, int>();
+        for (var rowIndex = 0; rowIndex < Math.Min(matrix.Count, 40) && headerRowIndex < 0; rowIndex++)
+        {
+            var found = new Dictionary<string, int>();
+            for (var col = 0; col < matrix[rowIndex].Count; col++)
+            {
+                var key = NormalizeBbvaHeader(matrix[rowIndex][col]);
+                if (key.Length == 0)
+                {
+                    continue;
+                }
+
+                if (key.StartsWith("fechadeoper")) { found.TryAdd("fecha", col); }
+                else if (key.StartsWith("fechadeproc")) { found.TryAdd("fechaProceso", col); }
+                else if (key.StartsWith("nrodeoper")) { found.TryAdd("nro", col); }
+                else if (key == "movimiento") { found.TryAdd("movimiento", col); }
+                else if (key.StartsWith("descrip")) { found.TryAdd("descripcion", col); }
+                else if (key == "canal") { found.TryAdd("canal", col); }
+                else if (key == "cargo") { found.TryAdd("cargo", col); }
+                else if (key == "abono") { found.TryAdd("abono", col); }
+                else if (key.StartsWith("saldocontable")) { found.TryAdd("saldo", col); }
+            }
+
+            if (found.ContainsKey("fecha") && found.ContainsKey("cargo") && found.ContainsKey("abono"))
+            {
+                headerRowIndex = rowIndex;
+                columns = found;
+            }
+        }
+
+        if (headerRowIndex < 0)
+        {
+            return new ConciliacionBcpAnalizarArchivoResponseDto
+            {
+                NombreArchivo = archivo.NombreArchivo,
+                NombreHoja = archivo.NombreHoja,
+                NumeroHoja = archivo.NumeroHoja,
+                TotalFilas = archivo.TotalFilas,
+                IdBanco = 4,
+                CodigoBanco = codigoBanco,
+                RequiereRevision = true,
+                Observacion = "No se encontro la fila de titulos de Interbank (Fecha de operacion, Nro. de operacion, Movimiento, Descripcion, Canal, Cargo, Abono, Saldo contable).",
+                Advertencias = ["El archivo no coincide con la plantilla Consulta de Movimientos de Cuenta Corriente de Interbank."],
+                Mapeos = [],
+                FilasNormalizadas = []
+            };
+        }
+
+        // 2. Cabecera: "Empresa: CJ TELECOM" / "Cuenta: Corriente Soles 041-3002226685"
+        string? empresa = null;
+        string? cuenta = null;
+        string? moneda = null;
+        for (var rowIndex = 0; rowIndex < headerRowIndex; rowIndex++)
+        {
+            var joined = string.Join(" ", matrix[rowIndex].Where(cell => !string.IsNullOrWhiteSpace(cell)));
+
+            var empresaMatch = Regex.Match(joined, @"^Empresa\s*:\s*(.+)$", RegexOptions.IgnoreCase);
+            if (empresaMatch.Success && empresa is null)
+            {
+                empresa = NormalizeText(empresaMatch.Groups[1].Value);
+            }
+
+            var cuentaMatch = Regex.Match(joined, @"^Cuenta\s*:\s*(.*?)\s*([\d]{2,}[\d\-]*)\s*$", RegexOptions.IgnoreCase);
+            if (cuentaMatch.Success && cuenta is null)
+            {
+                var tipo = cuentaMatch.Groups[1].Value;
+                cuenta = cuentaMatch.Groups[2].Value.Trim();
+
+                if (tipo.Contains("sol", StringComparison.OrdinalIgnoreCase))
+                {
+                    moneda = "Soles";
+                }
+                else if (tipo.Contains("lares", StringComparison.OrdinalIgnoreCase) || tipo.Contains("usd", StringComparison.OrdinalIgnoreCase))
+                {
+                    moneda = "Dólares";
+                }
+            }
+        }
+
+        cuenta ??= NormalizeText(archivo.Cuenta);
+        empresa ??= NormalizeText(archivo.Empresa);
+
+        string? GetCell(List<string> row, string key) =>
+            columns.TryGetValue(key, out var index) && index < row.Count ? NormalizeText(row[index]) : null;
+
+        var advertencias = new List<string>();
+        var filas = new List<Dictionary<string, object?>>();
+        var invalidas = 0;
+
+        for (var rowIndex = headerRowIndex + 1; rowIndex < matrix.Count; rowIndex++)
+        {
+            var row = matrix[rowIndex];
+            if (IsEmptyRow(row))
+            {
+                continue;
+            }
+
+            var fechaTexto = GetCell(row, "fecha");
+            if (fechaTexto is null)
+            {
+                continue;
+            }
+
+            var fecha = TryParseBbvaDate(fechaTexto);
+            var cargoTexto = GetCell(row, "cargo");
+            var abonoTexto = GetCell(row, "abono");
+            var cargo = TryParseInterbankAmount(cargoTexto);
+            var abono = TryParseInterbankAmount(abonoTexto);
+            var monto = cargo is not null && cargo != 0m ? cargo : abono;
+
+            if (fecha is null || monto is null)
+            {
+                invalidas++;
+                advertencias.Add($"Fila {rowIndex + 1}: fecha o importe no reconocidos ({fechaTexto} / cargo {cargoTexto} / abono {abonoTexto}).");
+                continue;
+            }
+
+            // Si la moneda no vino en la cabecera, se deduce del simbolo del importe.
+            if (moneda is null)
+            {
+                var simbolo = cargoTexto ?? abonoTexto ?? string.Empty;
+                moneda = simbolo.Contains('$') ? "Dólares" : simbolo.Contains("S/") ? "Soles" : null;
+            }
+
+            var nro = GetCell(row, "nro");
+            if (nro is not null && nro.All(ch => ch == '-' || char.IsWhiteSpace(ch)))
+            {
+                nro = null; // ITF y otros cargos internos vienen con "-"
+            }
+
+            var movimientoBanco = GetCell(row, "movimiento");
+            var detalle = GetCell(row, "descripcion");
+            var descripcion = string.Join(" - ", new[] { movimientoBanco, detalle }.Where(item => !string.IsNullOrWhiteSpace(item)));
+
+            // La comision "N/D VARIOS - COM/TRAN OP" trae el mismo nro que su transferencia: se deja sin numero
+            // (como el ITF) para que no cruce contra la transferencia, y se conserva la referencia en la descripcion.
+            if (nro is not null && descripcion.Contains("COM/TRAN", StringComparison.OrdinalIgnoreCase))
+            {
+                descripcion = $"{descripcion} (OPERACION: {nro})";
+                nro = null;
+            }
+
+            var movimiento = CreateEmptyOrderedMovementRow();
+            movimiento["Empresa"] = empresa;
+            movimiento["Cuenta"] = cuenta;
+            movimiento["Moneda"] = moneda;
+            movimiento["Fecha"] = fecha.Value.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+            movimiento["FechaValuta"] = TryParseBbvaDate(GetCell(row, "fechaProceso"))?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+            movimiento["DescripcionOperacion"] = descripcion;
+            movimiento["Monto"] = monto.Value;
+            movimiento["SucursalAgencia"] = GetCell(row, "canal");
+            movimiento["NroOperacion"] = nro is null ? null : NormalizeOperationNumber(nro);
+
+            ApplyBancoMetadata(movimiento, codigoBanco);
+            movimiento["ArchivoOrigen"] = archivo.NombreArchivo;
+            movimiento["UsuarioImportacion"] = string.IsNullOrWhiteSpace(usuario) ? null : usuario.Trim();
+            movimiento["IdActivo"] = true;
+
+            var esNroValido = IsValidOperationNumber(movimiento["NroOperacion"]?.ToString());
+            movimiento["EsNroOperacionValido"] = esNroValido;
+            movimiento["TipoMovimientoBanco"] = ResolveTipoMovimientoBanco(descripcion);
+            movimiento["EstadoConciliacion"] = ResolveEstadoConciliacion(esNroValido, descripcion);
+
+            filas.Add(movimiento);
+        }
+
+        if (string.IsNullOrWhiteSpace(cuenta))
+        {
+            advertencias.Add("No se pudo leer la cuenta en la cabecera 'Cuenta:'.");
+        }
+
+        if (filas.Count == 0)
+        {
+            advertencias.Add("No se encontraron movimientos en el archivo Interbank.");
+        }
+
+        var mapeos = new List<ConciliacionBcpMapeoColumnaDto>();
+        void AddMap(string key, string destino)
+        {
+            if (columns.TryGetValue(key, out var index) && index < matrix[headerRowIndex].Count)
+            {
+                mapeos.Add(new ConciliacionBcpMapeoColumnaDto
+                {
+                    ColumnaOrigen = matrix[headerRowIndex][index],
+                    ParametroDestino = destino,
+                    Confianza = 1m,
+                    Comentario = "Plantilla Interbank (mapeo fijo)."
+                });
+            }
+        }
+
+        AddMap("fecha", "Fecha");
+        AddMap("fechaProceso", "FechaValuta");
+        AddMap("nro", "NroOperacion");
+        AddMap("descripcion", "DescripcionOperacion");
+        AddMap("cargo", "Monto");
+        AddMap("canal", "SucursalAgencia");
+
+        var filasOrdenadas = filas
+            .OrderBy(fila => NormalizeSortableText(fila["NroOperacion"]?.ToString()))
+            .ThenBy(fila => NormalizeSortableText(fila["Fecha"]?.ToString()))
+            .ToList();
+
+        return new ConciliacionBcpAnalizarArchivoResponseDto
+        {
+            NombreArchivo = archivo.NombreArchivo,
+            Empresa = empresa,
+            Cuenta = cuenta,
+            Moneda = moneda,
+            IdBanco = 4,
+            CodigoBanco = NormalizeText(codigoBanco) ?? "INTERBANK",
+            NombreHoja = archivo.NombreHoja,
+            NumeroHoja = archivo.NumeroHoja,
+            TotalFilas = archivo.TotalFilas,
+            FilaCabecera = headerRowIndex + 1,
+            FilaDatos = headerRowIndex + 2,
+            RequiereRevision = filasOrdenadas.Count == 0 || invalidas > 0,
+            Observacion = "Archivo Interbank interpretado con la plantilla fija Consulta de Movimientos (sin OpenAI).",
+            Advertencias = advertencias,
+            Mapeos = mapeos,
+            FilasNormalizadas = filasOrdenadas
+        };
+    }
+
+    private static string NormalizeBbvaHeader(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        var decomposed = value.Normalize(NormalizationForm.FormD);
+        var builder = new StringBuilder(decomposed.Length);
+        foreach (var ch in decomposed)
+        {
+            if (CharUnicodeInfo.GetUnicodeCategory(ch) != UnicodeCategory.NonSpacingMark && char.IsLetter(ch))
+            {
+                builder.Append(char.ToLowerInvariant(ch));
+            }
+        }
+
+        return builder.ToString();
+    }
+
+    private static DateTime? TryParseBbvaDate(string? value)
+    {
+        var text = NormalizeText(value);
+        if (text is null)
+        {
+            return null;
+        }
+
+        text = text.Split(' ', 'T')[0];
+
+        if (DateTime.TryParseExact(
+                text,
+                ["d/M/yyyy", "dd/MM/yyyy", "d-M-yyyy", "dd-MM-yyyy", "yyyy-MM-dd"],
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.None,
+                out var parsed))
+        {
+            return parsed;
+        }
+
+        return null;
+    }
+
+    private static decimal? TryParseBbvaAmount(string? value)
+    {
+        var text = NormalizeText(value)?.Replace(" ", string.Empty);
+        if (text is null)
+        {
+            return null;
+        }
+
+        var lastComma = text.LastIndexOf(',');
+        var lastDot = text.LastIndexOf('.');
+
+        if (lastComma >= 0 && lastDot >= 0)
+        {
+            // El ultimo separador es el decimal; el otro es de miles.
+            text = lastComma > lastDot
+                ? text.Replace(".", string.Empty).Replace(',', '.')
+                : text.Replace(",", string.Empty);
+        }
+        else if (lastComma >= 0)
+        {
+            text = Regex.IsMatch(text, @",\d{1,2}$")
+                ? text.Replace(',', '.')
+                : text.Replace(",", string.Empty);
+        }
+
+        return decimal.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out var amount)
+            ? amount
+            : null;
+    }
+
+    private ConciliacionBcpAnalizarArchivoResponseDto AnalyzeBbvaFile(
+        ConciliacionBcpArchivoMuestraDto archivo,
+        string? usuario,
+        string? codigoBanco)
+    {
+        var matrix = archivo.Filas
+            .Where(row => row is not null)
+            .Select(row => row.Select(cell => cell?.Trim() ?? string.Empty).ToList())
+            .ToList();
+
+        // 1. Fila de titulos: F. Operacion | F. Valor | Codigo | N. Doc. | Concepto | Importe | Oficina
+        var headerRowIndex = -1;
+        var columns = new Dictionary<string, int>();
+        for (var rowIndex = 0; rowIndex < Math.Min(matrix.Count, 30) && headerRowIndex < 0; rowIndex++)
+        {
+            var found = new Dictionary<string, int>();
+            for (var col = 0; col < matrix[rowIndex].Count; col++)
+            {
+                var key = NormalizeBbvaHeader(matrix[rowIndex][col]);
+                if (key.Length == 0)
+                {
+                    continue;
+                }
+
+                if (key.Contains("foperacion") || key == "foper") { found.TryAdd("fecha", col); }
+                else if (key.Contains("fvalor")) { found.TryAdd("fechaValuta", col); }
+                else if (key.Contains("codigo")) { found.TryAdd("codigo", col); }
+                else if (key.EndsWith("doc") || key.Contains("ndoc")) { found.TryAdd("doc", col); }
+                else if (key.Contains("concepto")) { found.TryAdd("concepto", col); }
+                else if (key.Contains("importe")) { found.TryAdd("importe", col); }
+                else if (key.Contains("oficina")) { found.TryAdd("oficina", col); }
+            }
+
+            if (found.ContainsKey("fecha") && found.ContainsKey("concepto") && found.ContainsKey("importe"))
+            {
+                headerRowIndex = rowIndex;
+                columns = found;
+            }
+        }
+
+        if (headerRowIndex < 0)
+        {
+            return new ConciliacionBcpAnalizarArchivoResponseDto
+            {
+                NombreArchivo = archivo.NombreArchivo,
+                NombreHoja = archivo.NombreHoja,
+                NumeroHoja = archivo.NumeroHoja,
+                TotalFilas = archivo.TotalFilas,
+                IdBanco = 3,
+                CodigoBanco = codigoBanco,
+                RequiereRevision = true,
+                Observacion = "No se encontro la fila de titulos de BBVA (F. Operacion, F. Valor, Codigo, N. Doc., Concepto, Importe, Oficina).",
+                Advertencias = ["El archivo no coincide con la plantilla de Historico de Movimientos BBVA."],
+                Mapeos = [],
+                FilasNormalizadas = []
+            };
+        }
+
+        // 2. Cabecera: "Cuenta Actual: 00110350680100036650 PEN CJ TELECOM SAC" / "Importes en: PEN"
+        string? cuenta = null;
+        string? empresa = null;
+        string? monedaCodigo = null;
+        for (var rowIndex = 0; rowIndex < headerRowIndex; rowIndex++)
+        {
+            var joined = string.Join(" ", matrix[rowIndex].Where(cell => !string.IsNullOrWhiteSpace(cell)));
+
+            var cuentaMatch = Regex.Match(joined, @"Cuenta\s+Actual\s*:?\s*([\d\-]+)\s*(PEN|USD|EUR)?\s*(.*)$", RegexOptions.IgnoreCase);
+            if (cuentaMatch.Success && cuenta is null)
+            {
+                cuenta = cuentaMatch.Groups[1].Value.Trim();
+                monedaCodigo ??= NormalizeText(cuentaMatch.Groups[2].Value)?.ToUpperInvariant();
+                empresa = NormalizeText(cuentaMatch.Groups[3].Value);
+            }
+
+            var monedaMatch = Regex.Match(joined, @"Importes\s+en\s*:?\s*(PEN|USD|EUR)", RegexOptions.IgnoreCase);
+            if (monedaMatch.Success)
+            {
+                monedaCodigo = monedaMatch.Groups[1].Value.ToUpperInvariant();
+            }
+        }
+
+        var moneda = monedaCodigo switch
+        {
+            "PEN" => "Soles",
+            "USD" => "Dólares",
+            "EUR" => "Euros",
+            _ => NormalizeText(archivo.Moneda)
+        };
+        cuenta ??= NormalizeText(archivo.Cuenta);
+        empresa ??= NormalizeText(archivo.Empresa);
+
+        // 3. Movimientos
+        string? GetCell(List<string> row, string key) =>
+            columns.TryGetValue(key, out var index) && index < row.Count ? NormalizeText(row[index]) : null;
+
+        var advertencias = new List<string>();
+        var filas = new List<Dictionary<string, object?>>();
+        decimal? saldoInicial = null;
+        decimal? saldoFinal = null;
+        var fechasInvalidas = 0;
+
+        for (var rowIndex = headerRowIndex + 1; rowIndex < matrix.Count; rowIndex++)
+        {
+            var row = matrix[rowIndex];
+            if (IsEmptyRow(row))
+            {
+                continue;
+            }
+
+            var concepto = GetCell(row, "concepto");
+            var importeTexto = GetCell(row, "importe");
+
+            if (concepto is not null && concepto.StartsWith("Saldo Inicial", StringComparison.OrdinalIgnoreCase))
+            {
+                saldoInicial = TryParseBbvaAmount(importeTexto);
+                continue;
+            }
+
+            if (concepto is not null && concepto.StartsWith("Saldo Final", StringComparison.OrdinalIgnoreCase))
+            {
+                saldoFinal = TryParseBbvaAmount(importeTexto);
+                continue;
+            }
+
+            var fechaTexto = GetCell(row, "fecha");
+            if (fechaTexto is null)
+            {
+                continue;
+            }
+
+            var fecha = TryParseBbvaDate(fechaTexto);
+            var monto = TryParseBbvaAmount(importeTexto);
+            if (fecha is null || monto is null)
+            {
+                fechasInvalidas++;
+                advertencias.Add($"Fila {rowIndex + 1}: fecha o importe no reconocidos ({fechaTexto} / {importeTexto}).");
+                continue;
+            }
+
+            var nroOperacion = GetCell(row, "doc");
+            var fechaValuta = TryParseBbvaDate(GetCell(row, "fechaValuta"));
+
+            var movimiento = CreateEmptyOrderedMovementRow();
+            movimiento["Empresa"] = empresa;
+            movimiento["Cuenta"] = cuenta;
+            movimiento["Moneda"] = moneda;
+            movimiento["Fecha"] = fecha.Value.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+            movimiento["FechaValuta"] = fechaValuta?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+            movimiento["DescripcionOperacion"] = concepto;
+            movimiento["Referencia"] = GetCell(row, "codigo");
+            movimiento["Monto"] = monto.Value;
+            movimiento["SucursalAgencia"] = GetCell(row, "oficina");
+            movimiento["NroOperacion"] = nroOperacion is null ? null : NormalizeOperationNumber(nroOperacion);
+
+            ApplyBancoMetadata(movimiento, codigoBanco);
+            movimiento["ArchivoOrigen"] = archivo.NombreArchivo;
+            movimiento["UsuarioImportacion"] = string.IsNullOrWhiteSpace(usuario) ? null : usuario.Trim();
+            movimiento["IdActivo"] = true;
+
+            var esNroValido = IsValidOperationNumber(movimiento["NroOperacion"]?.ToString());
+            movimiento["EsNroOperacionValido"] = esNroValido;
+            movimiento["TipoMovimientoBanco"] = ResolveTipoMovimientoBanco(concepto);
+            movimiento["EstadoConciliacion"] = ResolveEstadoConciliacion(esNroValido, concepto);
+
+            filas.Add(movimiento);
+        }
+
+        // 4. Validacion de cuadre: saldo inicial + movimientos = saldo final
+        if (saldoInicial.HasValue && saldoFinal.HasValue && filas.Count > 0)
+        {
+            var calculado = saldoInicial.Value + filas.Sum(fila => (decimal)(fila["Monto"] ?? 0m));
+            if (Math.Abs(calculado - saldoFinal.Value) > 0.01m)
+            {
+                advertencias.Add(
+                    $"El saldo no cuadra: saldo inicial {saldoInicial.Value:N2} + movimientos = {calculado:N2}, pero el ultimo saldo final del archivo es {saldoFinal.Value:N2}.");
+            }
+        }
+
+        if (string.IsNullOrWhiteSpace(cuenta))
+        {
+            advertencias.Add("No se pudo leer la cuenta en la cabecera 'Cuenta Actual'.");
+        }
+
+        if (filas.Count == 0)
+        {
+            advertencias.Add("No se encontraron movimientos en el archivo BBVA.");
+        }
+
+        var mapeos = new List<ConciliacionBcpMapeoColumnaDto>();
+        void AddMap(string key, string origen, string destino)
+        {
+            if (columns.TryGetValue(key, out var index) && index < matrix[headerRowIndex].Count)
+            {
+                mapeos.Add(new ConciliacionBcpMapeoColumnaDto
+                {
+                    ColumnaOrigen = string.IsNullOrWhiteSpace(matrix[headerRowIndex][index]) ? origen : matrix[headerRowIndex][index],
+                    ParametroDestino = destino,
+                    Confianza = 1m,
+                    Comentario = "Plantilla BBVA (mapeo fijo)."
+                });
+            }
+        }
+
+        AddMap("fecha", "F. Operación", "Fecha");
+        AddMap("fechaValuta", "F. Valor", "FechaValuta");
+        AddMap("codigo", "Código", "Referencia");
+        AddMap("doc", "Nº. Doc.", "NroOperacion");
+        AddMap("concepto", "Concepto", "DescripcionOperacion");
+        AddMap("importe", "Importe", "Monto");
+        AddMap("oficina", "Oficina", "SucursalAgencia");
+
+        var filasOrdenadas = filas
+            .OrderBy(fila => NormalizeSortableText(fila["NroOperacion"]?.ToString()))
+            .ThenBy(fila => NormalizeSortableText(fila["Fecha"]?.ToString()))
+            .ToList();
+
+        return new ConciliacionBcpAnalizarArchivoResponseDto
+        {
+            NombreArchivo = archivo.NombreArchivo,
+            Empresa = empresa,
+            Cuenta = cuenta,
+            Moneda = moneda,
+            IdBanco = 3,
+            CodigoBanco = NormalizeText(codigoBanco) ?? "BBVA",
+            NombreHoja = archivo.NombreHoja,
+            NumeroHoja = archivo.NumeroHoja,
+            TotalFilas = archivo.TotalFilas,
+            FilaCabecera = headerRowIndex + 1,
+            FilaDatos = headerRowIndex + 2,
+            RequiereRevision = filasOrdenadas.Count == 0 || fechasInvalidas > 0,
+            Observacion = "Archivo BBVA interpretado con la plantilla fija Historico de Movimientos (sin OpenAI).",
+            Advertencias = advertencias,
+            Mapeos = mapeos,
+            FilasNormalizadas = filasOrdenadas
+        };
+    }
+
     private static bool IsBancoConAgrupacionPorOperacion(string? codigoBanco)
     {
         return IsScotiabankCode(codigoBanco) || IsBcpCode(codigoBanco);
@@ -4683,7 +5350,10 @@ Devuelve Ãºnicamente JSON vÃ¡lido con esta estructura:
     private static void ApplyBancoMetadata(Dictionary<string, object?> row, string? codigoBanco)
     {
         var resolvedCodigoBanco = NormalizeText(codigoBanco);
-        var resolvedIdBanco = IsScotiabankCode(resolvedCodigoBanco) ? 2 : 1;
+        var resolvedIdBanco = IsScotiabankCode(resolvedCodigoBanco)
+            ? 2
+            : IsBbvaCode(resolvedCodigoBanco) ? 3
+            : IsInterbankCode(resolvedCodigoBanco) ? 4 : 1;
 
         row["IdBanco"] = resolvedIdBanco;
         row["CodigoBanco"] = string.IsNullOrWhiteSpace(resolvedCodigoBanco) ? "BCP" : resolvedCodigoBanco;

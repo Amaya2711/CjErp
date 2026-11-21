@@ -32,6 +32,7 @@ import type {
 import type { PlanillaConsultaParametro } from "../../models/planillaConsulta";
 import { getHttpErrorMessage } from "../../utils/httpError";
 import { ArrowUpDown, ChevronDown, ChevronRight, Eye, FileDown, Maximize2, Minimize2, Search } from "lucide-react";
+import IngresosPendientesPanel from "./IngresosPendientesPanel";
 
 const MAX_FILE_SIZE_BYTES = 15_000_000;
 type ConciliacionSortKey =
@@ -310,6 +311,8 @@ const DETAIL_CONCILIACION_SEARCH_KEYS: ConciliacionSortKey[] = [
 const BANCO_OPTIONS = [
   { code: "BCP", label: "BCP", idBanco: 1 },
   { code: "SCOTIABANK", label: "Scotiabank", idBanco: 2 },
+  { code: "BBVA", label: "BBVA", idBanco: 3 },
+  { code: "INTERBANK", label: "Interbank", idBanco: 4 },
 ] as const;
 
 function getBancoSeleccionadoId(codigo: string): number {
@@ -1580,7 +1583,16 @@ async function fileToBase64(file: File): Promise<string> {
 async function parseExcelFile(file: File, codigoBanco?: string | null): Promise<ParsedConciliacionExcelFile> {
   const XLSX = await import("xlsx");
   const buffer = await file.arrayBuffer();
-  const workbook = XLSX.read(buffer, { type: "array", cellDates: true });
+  // BBVA: las celdas de fecha con formato "corto" de Excel se leen como m/d/yy (formato US); se fuerza dd/mm/yyyy.
+  const esBbva = ["BBVA", "INTERBANK"].some((banco) => normalizeText(codigoBanco).includes(banco));
+  // BBVA descarga un ".xls" que en realidad es una tabla HTML en Windows-1252: se decodifica asi y se lee como
+  // texto (raw) para no perder ceros del Nº Doc ni reinterpretar fechas/importes.
+  const headBytes = new Uint8Array(buffer.slice(0, 512));
+  const headText = new TextDecoder("windows-1252").decode(headBytes).trimStart().toLowerCase();
+  const esHtmlBbva = esBbva && (headText.startsWith("<table") || headText.startsWith("<html") || headText.startsWith("<!doctype"));
+  const workbook = esHtmlBbva
+    ? XLSX.read(new TextDecoder("windows-1252").decode(buffer), { type: "string", raw: true })
+    : XLSX.read(buffer, { type: "array", cellDates: true, ...(esBbva ? { dateNF: "dd/mm/yyyy" } : {}) });
   const sheetName = findPreferredWorksheetName(workbook.SheetNames);
 
   if (!sheetName) {
@@ -1604,6 +1616,7 @@ async function parseExcelFile(file: File, codigoBanco?: string | null): Promise<
     blankrows: true,
     // Leer el valor formateado evita perder ceros a la izquierda en bancos como Scotiabank.
     raw: false,
+    ...(esBbva ? { dateNF: "dd/mm/yyyy" } : {}),
   });
 
   const normalizedRows = matrix
@@ -1713,6 +1726,7 @@ export default function ConciliacionBcpPage() {
     DEFAULT_CONCILIACION_REVISION_FILTERS
   );
   const [revisionTipoCambioDiario, setRevisionTipoCambioDiario] = useState<number>(DEFAULT_TIPO_CAMBIO_DIARIO);
+  const [vistaPrincipal, setVistaPrincipal] = useState<"BANCOS" | "INGRESO">("BANCOS");
   const [conciliacionPlanillaTab, setConciliacionPlanillaTab] = useState<ConciliacionPlanillaTab>("revision");
   const [isResultadoFilterOpen, setIsResultadoFilterOpen] = useState(false);
   const [clasificacionCombos, setClasificacionCombos] = useState<ConciliacionBcpClasificacionCombosResponse | null>(null);
@@ -3661,7 +3675,14 @@ export default function ConciliacionBcpPage() {
           setError(getHttpErrorMessage(insertError, "No se pudo insertar la conciliacion BCP."));
         }
       } else {
-        setMessage(response.resumen || "Analisis de conciliacion completado.");
+        // Muestra el motivo por el que no se graba (observacion/advertencias del backend) en vez de solo el resumen.
+        const motivos = response.archivos
+          .map((item) => {
+            const detalle = [item.observacion, ...(item.advertencias ?? []).slice(0, 3)].filter(Boolean).join(" | ");
+            return `${item.nombreArchivo} (${item.filasNormalizadas?.length ?? 0} filas): ${detalle || "sin detalle"}`;
+          })
+          .join(" || ");
+        setError(`No se grabo nada. ${buildInsertBlockedMessage(response)} ${motivos}`);
       }
     } catch (analysisError) {
       setAnalysis(null);
@@ -3983,6 +4004,28 @@ export default function ConciliacionBcpPage() {
 
   return (
     <div style={styles.page}>
+      <div style={styles.planillaTabs}>
+        {(["BANCOS", "INGRESO"] as const).map((vista) => (
+          <button
+            key={vista}
+            type="button"
+            style={{
+              ...styles.planillaTabButton,
+              ...(vistaPrincipal === vista ? styles.planillaTabButtonActive : null),
+            }}
+            onClick={() => setVistaPrincipal(vista)}
+          >
+            {vista}
+          </button>
+        ))}
+      </div>
+
+      {vistaPrincipal === "INGRESO" ? (
+        <IngresosPendientesPanel />
+      ) : null}
+
+      {/* BANCOS: toda la logica actual. Se oculta (sin desmontar) para conservar archivos, analisis y filtros al cambiar de pestaña. */}
+      <div style={{ display: vistaPrincipal === "BANCOS" ? "contents" : "none" }}>
       <div style={styles.hero}>
         <div>
           <p style={styles.kicker}>Finanzas / Conciliacion {codigoBanco}</p>
@@ -5839,6 +5882,7 @@ export default function ConciliacionBcpPage() {
           </div>
         </div>
       ) : null}
+      </div>
     </div>
   );
 }

@@ -143,7 +143,11 @@ export default function PagoSumaResponsable({ fila, tipoCambio, request, accent,
           if (nativo === null) continue;
 
           lista.push({
-            correlativo: str(pick(row, "Corre", "Correlativo", "correlativo")),
+            // "Corre" es el correlativo del recibo. "Correlativo" del SP es el código de estado (Constante),
+            // por eso va solo como último recurso y se lee "Corre" primero (pick prueba coincidencia exacta de
+            // todas las claves antes que sin distinguir mayúsculas).
+            correlativo:
+              str(pick(row, "Corre")) || str(pick(row, "CorrelativoPlanilla")) || str(pick(row, "Correlativo")),
             fecha: str(pick(row, "FecIngreso", "fecIngreso")),
             estado,
             estadoNombre: str(pick(row, "EstadoNombre", "NombreEstado")) || String(estado),
@@ -343,7 +347,7 @@ export default function PagoSumaResponsable({ fila, tipoCambio, request, accent,
             <table style={{ borderCollapse: "collapse", width: "100%" }}>
               <thead>
                 <tr>
-                  <th style={th}>Recibo</th>
+                  <th style={th}>Correlativo</th>
                   <th style={th}>Fecha</th>
                   <th style={th}>Estado</th>
                   <th style={th}>OT</th>
@@ -360,7 +364,7 @@ export default function PagoSumaResponsable({ fila, tipoCambio, request, accent,
                   const tc = tcDe(moneda, tipoCambio);
                   return (
                     <tr key={`${r.correlativo}-${r.estado}`}>
-                      <td style={td}>{r.correlativo}</td>
+                      <td style={{ ...td, fontWeight: 800, whiteSpace: "nowrap" }}>{r.correlativo || "—"}</td>
                       <td style={td}>{r.fecha}</td>
                       <td style={td}>{r.estadoNombre}</td>
                       <td style={td}>{r.ot || "—"}</td>

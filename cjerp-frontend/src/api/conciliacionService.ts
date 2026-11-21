@@ -12,6 +12,7 @@ import type {
   ConciliacionBcpExportResponse,
   ConciliacionBcpInsertRequest,
   ConciliacionBcpInsertResponse,
+  IngresosPendientesResponse,
 } from "../models/conciliacionBcp";
 
 const BASE_URL = "/finanzas/conciliacion";
@@ -114,4 +115,19 @@ export async function actualizarClasificacionMovimientoConciliacionV1(
       timeout: 30000,
     }
   );
+}
+
+export async function obtenerIngresosPendientes(params: {
+  fechaInicio?: string | null;
+  fechaFin?: string | null;
+  codigoBanco?: string | null;
+}): Promise<IngresosPendientesResponse> {
+  return await httpClient.get<IngresosPendientesResponse>(`${BASE_URL}/ingresos-pendientes`, {
+    params: {
+      fechaInicio: params.fechaInicio || undefined,
+      fechaFin: params.fechaFin || undefined,
+      codigoBanco: params.codigoBanco || undefined,
+    },
+    timeout: 30000,
+  });
 }
