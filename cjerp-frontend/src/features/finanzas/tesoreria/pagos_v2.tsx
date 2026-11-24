@@ -47,10 +47,11 @@ import PagoSumaResponsable from "./PagoSumaResponsable";
 import DataGridPro from "../../../components/datagrid/DataGridPro";
 import type { GridColumn } from "../../../components/datagrid/types";
 
-type PagoTabKey = "aprobar" | "reaprobar" | "hormiga" | "observadas" | "resumen";
+// "ficticio": todos los registros de Aprobar/Re-aprobar/Hormiga/Observadas con % Ficticio mayor a UMBRAL_FICTICIO_ALTO.
+type PagoTabKey = "aprobar" | "reaprobar" | "hormiga" | "observadas" | "resumen" | "ficticio";
 type DetailTabKey = "orden" | "resumen" | "suma-resp" | "con-pagado" | "historial" | "historial-oc";
 
-type PagoEstado = Exclude<PagoTabKey, "resumen">;
+type PagoEstado = Exclude<PagoTabKey, "resumen" | "ficticio">;
 
 type PagoRow = {
   id: number;
@@ -228,7 +229,12 @@ type ResumenOtDetalle = {
   porcentajeOcAdelanto: number;
 };
 
-const TAB_ORDER: PagoTabKey[] = ["aprobar", "reaprobar", "hormiga", "observadas", "resumen"];
+const TAB_ORDER: PagoTabKey[] = ["aprobar", "reaprobar", "hormiga", "observadas", "resumen", "ficticio"];
+
+// Estados que reúnen las bandejas operativas (Aprobar 0, Re-aprobar 6, Hormiga 10, Observadas 2 y 7).
+const ESTADOS_BANDEJAS = "0,2,6,7,10";
+// La pestaña "Alto % Ficticio" muestra los registros cuyo % Ficticio supera este valor.
+const UMBRAL_FICTICIO_ALTO = 70;
 
 function createEmptyRowsByTab(): Record<PagoTabKey, PagoRow[]> {
   return {
@@ -237,6 +243,7 @@ function createEmptyRowsByTab(): Record<PagoTabKey, PagoRow[]> {
     hormiga: [],
     observadas: [],
     resumen: [],
+    ficticio: [],
   };
 }
 
@@ -250,6 +257,8 @@ function groupRowsByEstado(rows: PagoRow[]): Record<PagoTabKey, PagoRow[]> {
   }
 
   grouped.resumen = rows;
+  // La consulta de esta pestaña ya se limita a los estados de las bandejas; el corte por % Ficticio se aplica al filtrar.
+  grouped.ficticio = rows;
   return grouped;
 }
 
@@ -289,6 +298,13 @@ const TAB_THEME: Record<PagoTabKey, TabTheme> = {
     border: "#C4B5FD",
     icon: <ShieldCheck size={16} strokeWidth={2.2} />,
   },
+  ficticio: {
+    label: "Alto % Ficticio",
+    accent: "#BE123C",
+    soft: "#FFF1F2",
+    border: "#FDA4AF",
+    icon: <AlertTriangle size={16} strokeWidth={2.2} />,
+  },
 };
 
 const PAGO_TABS: Array<{ key: PagoTabKey; label: string; icon: React.ReactNode }> = [
@@ -297,13 +313,16 @@ const PAGO_TABS: Array<{ key: PagoTabKey; label: string; icon: React.ReactNode }
   { key: "hormiga", label: "Hormiga", icon: <HandCoins size={14} /> },
   { key: "observadas", label: "Observadas", icon: <AlertTriangle size={14} /> },
   { key: "resumen", label: "Total Órdenes", icon: <ShieldCheck size={14} /> },
+  { key: "ficticio", label: `% Ficticio > ${UMBRAL_FICTICIO_ALTO}`, icon: <AlertTriangle size={14} /> },
 ];
 
-const TAB_ACTION_KEYS: Record<PagoEstado, string> = {
+const TAB_ACTION_KEYS: Record<PagoEstado | "ficticio", string> = {
   aprobar: "tab.aprobar",
   reaprobar: "tab.reaprobar",
   hormiga: "tab.hormiga",
   observadas: "tab.observadas",
+  // Deshabilitada por defecto: solo la ven ADMIN/SISTEMAS o quien tenga este permiso en SegPermisoAccion.
+  ficticio: "tab.ficticio",
 };
 
 function MultiSelectFiltro({
@@ -797,6 +816,30 @@ function calcularConsumoOcPorcentaje(row: Record<string, unknown>, estadoCodigo:
   const subtotal = getRecordNumber(row, "SubtotalOriginal", "subtotalOriginal", "Subtotalb", "subtotalb", "Subtotal", "subtotal") ?? 0;
   const solicitado = estado === "4" || estado === "2" ? 0 : Math.max(subtotal, 0);
   return getConsumptionPercent(totalOc, totalOc - (solicitado + pagadoOc));
+}
+
+// Monedas que intervienen en la OT del recibo: la suya, la de sus pagos y la de Importar.
+function getMonedasOtFila(row: PagoRow): number[] {
+  const ids = new Set<number>();
+  if (row.tipoMonedaId) ids.add(row.tipoMonedaId);
+  for (const lista of [row.monedasPagadoOt, row.monedasImportarOt]) {
+    for (const parte of String(lista ?? "").split(",")) {
+      const id = Number(parte.trim());
+      if (Number.isInteger(id) && id > 0) ids.add(id);
+    }
+  }
+  return [...ids].sort((a, b) => a - b);
+}
+
+// % Ficticio = Sub Ficticio ÷ Total Visible × 100 (una moneda: en esa moneda; mezcladas: todo en S/, montos ya
+// convertidos por el SP). No depende del tipo de cambio de la pantalla, por eso puede usarse al filtrar filas.
+function calcPctFicticioFila(row: PagoRow): number {
+  const mixto = getMonedasOtFila(row).length > 1;
+  const sub = mixto
+    ? (row.totalPagadoConvertidoSoles ?? 0) + (row.subtotalSoles ?? row.subtotal)
+    : (row.totalSubtotalPorMoneda ?? 0) + row.subtotal;
+  const visible = mixto ? row.totalMontoVisibleSoles ?? 0 : row.totalMontoVisiblePorMoneda ?? 0;
+  return visible > 0 ? (sub / visible) * 100 : 0;
 }
 
 function esTareaViatico(row: PagoRow): boolean {
@@ -1417,11 +1460,11 @@ function exportToExcel(fileName: string, headers: string[], rows: Array<Array<st
   XLSX.writeFile(workbook, fileName, { compression: true });
 }
 
-function getStatusLabel(tab: Exclude<PagoTabKey, "resumen">) {
+function getStatusLabel(tab: PagoEstado) {
   return TAB_THEME[tab].label;
 }
 
-function getStateColor(tab: Exclude<PagoTabKey, "resumen">) {
+function getStateColor(tab: PagoEstado) {
   return TAB_THEME[tab];
 }
 
@@ -1438,19 +1481,14 @@ export default function PagosV2Page() {
   const [resumenConsultaSolicitada, setResumenConsultaSolicitada] = useState(false);
   const [historialSortConfig, setHistorialSortConfig] = useState<{ column: PagoSortColumn; direction: "asc" | "desc" } | null>(null);
   const [appliedFilters, setAppliedFilters] = useState<FilterState>(() => getDefaultFilterState(DIAS_RANGO_DEFECTO));
-  const [rowsByTab, setRowsByTab] = useState<Record<PagoTabKey, PagoRow[]>>({
-    aprobar: [],
-    reaprobar: [],
-    hormiga: [],
-    observadas: [],
-    resumen: [],
-  });
+  const [rowsByTab, setRowsByTab] = useState<Record<PagoTabKey, PagoRow[]>>(createEmptyRowsByTab);
   const [kpiCounts, setKpiCounts] = useState<Record<PagoTabKey, number>>({
     aprobar: 0,
     reaprobar: 0,
     hormiga: 0,
     observadas: 0,
     resumen: 0,
+    ficticio: 0,
   });
   // Falso al abrir: Total Órdenes (pestaña inicial) no consulta hasta pulsar Buscar.
   const [loadingData, setLoadingData] = useState(false);
@@ -1652,7 +1690,7 @@ export default function PagosV2Page() {
   }, []);
 
   const canUseTab = useCallback(
-    (tab: PagoEstado) => {
+    (tab: PagoEstado | "ficticio") => {
       // Observadas está activa para todos los usuarios, sin depender de SegPermisoAccion.
       if (tab === "observadas") {
         return true;
@@ -1802,7 +1840,7 @@ export default function PagosV2Page() {
       if (fechaFin) parametrosFechas.push({ nombre: "FechaFin", valor: fechaFin, tipo: "date" });
 
       const cargarKpisDesdeConsultaPrincipal = async () => {
-        const estadosKpi: Array<[Exclude<PagoTabKey, "resumen">, string]> = [
+        const estadosKpi: Array<[PagoEstado, string]> = [
           ["aprobar", "0"],
           ["reaprobar", "6"],
           ["hormiga", "10"],
@@ -1825,7 +1863,7 @@ export default function PagosV2Page() {
             return [tab, Number(response.totalRows) || 0] as const;
           }),
         );
-        const next = { aprobar: 0, reaprobar: 0, hormiga: 0, observadas: 0, resumen: 0 };
+        const next = { aprobar: 0, reaprobar: 0, hormiga: 0, observadas: 0, resumen: 0, ficticio: 0 };
         for (const [tab, total] of resultados) {
           next[tab] = total;
           next.resumen += total;
@@ -1840,7 +1878,7 @@ export default function PagosV2Page() {
         );
         if (controller.signal.aborted) return;
 
-        const next = { aprobar: 0, reaprobar: 0, hormiga: 0, observadas: 0, resumen: 0 };
+        const next = { aprobar: 0, reaprobar: 0, hormiga: 0, observadas: 0, resumen: 0, ficticio: 0 };
         let tieneResumenCompatible = false;
         for (const row of response.rows ?? []) {
           const count = getRecordNumber(row, "Cantidad", "cantidad", "Total", "total", "Conteo", "conteo") ?? 0;
@@ -1894,7 +1932,7 @@ export default function PagosV2Page() {
             setKpiCounts(await cargarKpisDesdeConsultaPrincipal());
           } catch {
             if (!controller.signal.aborted) {
-              setKpiCounts({ aprobar: 0, reaprobar: 0, hormiga: 0, observadas: 0, resumen: 0 });
+              setKpiCounts({ aprobar: 0, reaprobar: 0, hormiga: 0, observadas: 0, resumen: 0, ficticio: 0 });
             }
           }
         }
@@ -1983,6 +2021,7 @@ export default function PagosV2Page() {
           const estadoActivo = activeTab === "aprobar" ? "0"
             : activeTab === "reaprobar" ? "6"
             : activeTab === "hormiga" ? "10"
+            : activeTab === "ficticio" ? ESTADOS_BANDEJAS
             : "2,7"; // Observadas: estados 2 (observada) y 7 (observada administrativa)
           // Total Órdenes muestra todos los estados salvo que el usuario haya
           // elegido explícitamente uno o más estados en su filtro.
@@ -2092,7 +2131,7 @@ export default function PagosV2Page() {
 
         const groupStart = performance.now();
         nextRowsByTab = quickIdOcOnly
-          ? { aprobar: [], reaprobar: [], hormiga: [], observadas: [], resumen: [], [activeTab]: mappedRows }
+          ? { ...createEmptyRowsByTab(), [activeTab]: mappedRows }
           : groupRowsByEstado(mappedRows);
         pushLoadTrace(`Agrupación de registros: ${(performance.now() - groupStart).toFixed(0)} ms`);
 
@@ -2102,7 +2141,12 @@ export default function PagosV2Page() {
 
         // Pocas filas (p. ej. búsqueda por correlativo): se esperan los totales y se pinta una sola vez,
         // para no mostrar valores provisionales (% OC en 20% y luego 60%).
-        const pocasFilas = usoLigero && nextRowsByTab[activeTab].length > 0 && nextRowsByTab[activeTab].length <= TOTALES_UNA_CARGA_MAX_FILAS;
+        // % Ficticio filtra por un valor calculado con los totales: sin ellos la grilla queda vacía, así que
+        // siempre espera los totales y pinta una sola vez (igual que al reabrirla desde el caché).
+        const pocasFilas =
+          usoLigero &&
+          nextRowsByTab[activeTab].length > 0 &&
+          (activeTab === "ficticio" || nextRowsByTab[activeTab].length <= TOTALES_UNA_CARGA_MAX_FILAS);
         if (pocasFilas) {
           const completas = await cargarTotalesDiferidos(activeTab, nextRowsByTab[activeTab], cacheKey, parametros, signal, true);
           if (signal.aborted || cancelled) return;
@@ -2143,7 +2187,8 @@ export default function PagosV2Page() {
   // La suma por responsable es una consulta pesada (SoloSumaResp escanea Planilla). Depender de
   // rowsByTab la relanzaba en cada carga/aprobación/cambio de pestaña; solo importa si la bandeja
   // tiene filas, y tras aprobar se recalcula una vez vía kpiRefreshTick/refreshTick.
-  const bandejaTieneFilas = activeTab !== "resumen" && rowsByTab[activeTab].length > 0;
+  // La pestaña "% Ficticio" mezcla estados de varias bandejas: no calcula la suma por responsable.
+  const bandejaTieneFilas = activeTab !== "resumen" && activeTab !== "ficticio" && rowsByTab[activeTab].length > 0;
 
   useEffect(() => {
     if (!bandejaTieneFilas) {
@@ -2220,8 +2265,20 @@ export default function PagosV2Page() {
   }, [activeTab, bandejaTieneFilas, appliedFilters.fechaDesde, appliedFilters.fechaHasta, refreshTick, kpiRefreshTick, actualizarTabTick, loadingData]);
 
   const activeRows = useMemo(
-    () => (activeTab === "resumen" ? rowsByTab.resumen : rowsByTab[activeTab]).filter((row) => row.idSolicitante !== 0),
+    () =>
+      rowsByTab[activeTab].filter(
+        (row) =>
+          row.idSolicitante !== 0 &&
+          // % Ficticio depende de los totales diferidos: la lista se completa sola cuando llegan.
+          (activeTab !== "ficticio" || calcPctFicticioFila(row) > UMBRAL_FICTICIO_ALTO)
+      ),
     [activeTab, rowsByTab]
+  );
+  // Insignia de la pestaña "% Ficticio": solo se conoce tras cargarla (no hay contador previo en el servidor).
+  const ficticioCargado = rowsByTab.ficticio.length > 0;
+  const ficticioConteo = useMemo(
+    () => rowsByTab.ficticio.filter((row) => row.idSolicitante !== 0 && calcPctFicticioFila(row) > UMBRAL_FICTICIO_ALTO).length,
+    [rowsByTab.ficticio]
   );
 
   const matchesAppliedFilters = useCallback(
@@ -2246,7 +2303,7 @@ export default function PagosV2Page() {
 
       // Re-aprobar, Hormiga y Observadas solo se filtran por el código de su estado,
       // que ya se aplicó en la consulta: no heredan filtros de cabecera.
-      if (activeTab === "reaprobar" || activeTab === "hormiga" || activeTab === "observadas") {
+      if (activeTab === "reaprobar" || activeTab === "hormiga" || activeTab === "observadas" || activeTab === "ficticio") {
         return true;
       }
 
@@ -3355,10 +3412,11 @@ export default function PagosV2Page() {
         };
     }
   }, [activeTab]);
-  const isResumenTab = activeTab === "resumen";
-  // El estado propio de Planilla sólo se expone en Total Órdenes; las demás
-  // pestañas ya representan un estado operativo específico.
-  const showEstadoPlanilla = activeTab === "resumen";
+  // Total Órdenes y % Ficticio solo consultan/exportan (sin aprobar, observar ni rechazar).
+  const isResumenTab = activeTab === "resumen" || activeTab === "ficticio";
+  // El estado propio de Planilla se expone en Total Órdenes y en % Ficticio (mezcla estados de varias bandejas);
+  // las demás pestañas ya representan un estado operativo específico.
+  const showEstadoPlanilla = activeTab === "resumen" || activeTab === "ficticio";
   const showTotalSitio = canUseTab("reaprobar");
   const openDetailForRow = (row: PagoRow) => {
     setSelectedId(row.id);
@@ -4157,17 +4215,7 @@ export default function PagosV2Page() {
         : id === 4 ? parseNumericValue(tipoCambioDop)
           : id === 5 ? parseNumericValue(tipoCambioCop)
             : 1;
-  const getMonedasOt = (row: PagoRow): number[] => {
-    const ids = new Set<number>();
-    if (row.tipoMonedaId) ids.add(row.tipoMonedaId);
-    for (const lista of [row.monedasPagadoOt, row.monedasImportarOt]) {
-      for (const parte of String(lista ?? "").split(",")) {
-        const id = Number(parte.trim());
-        if (Number.isInteger(id) && id > 0) ids.add(id);
-      }
-    }
-    return [...ids].sort((a, b) => a - b);
-  };
+  const getMonedasOt = getMonedasOtFila;
   // Una sola moneda: se calcula y muestra en esa moneda. Varias: todo se convierte a soles con el TC de la pantalla.
   const getFicticioInfo = (row: PagoRow) => {
     const monedas = getMonedasOt(row);
@@ -4211,10 +4259,7 @@ export default function PagosV2Page() {
     </span>
   );
   const calcSubFicticio = (row: PagoRow) => getFicticioInfo(row).sub;
-  const calcFicticio = (row: PagoRow) => {
-    const info = getFicticioInfo(row);
-    return info.visible > 0 ? (info.sub / info.visible) * 100 : 0;
-  };
+  const calcFicticio = calcPctFicticioFila;
   // Subtotal de Total Sitio / Total Visible: se suman por símbolo de moneda (S/, $, €…), igual que se muestran en cada
   // celda, nunca mezclando monedas. Ambos valores son el total de Importar de la OT/sitio y se repiten en cada recibo
   // de esa OT, por lo que CADA OT/sitio se cuenta UNA sola vez (misma clave que usa el SP para calcularlos:
@@ -4293,7 +4338,13 @@ export default function PagosV2Page() {
       ),
     },
     { dataField: "fecha", caption: "Fecha", dataType: "date", width: 100, calculateCellValue: (row) => toComparableDateKey(row.fecha) },
-    { dataField: "solicitante", caption: "Solicitante", width: 280, groupIndex: 0, sortOrder: "asc" },
+    // La pestaña "% Ficticio" se agrupa por Estado planilla; las demás, por Solicitante.
+    {
+      dataField: "solicitante",
+      caption: "Solicitante",
+      width: 280,
+      ...(activeTab === "ficticio" ? {} : { groupIndex: 0, sortOrder: "asc" as const }),
+    },
     { dataField: "cliente", caption: "Cliente", width: 110 },
     { dataField: "proyecto", caption: "Proyecto", width: 130 },
     { dataField: "site", caption: "Site", width: 170 },
@@ -4523,8 +4574,8 @@ export default function PagosV2Page() {
         "Estados: Constante 'estado' (código - nombre).\n" +
         "Solo visible para los empleados de la constante PERMISO_ESTADO.",
       width: 190,
-      // Solo en la pestaña Total Órdenes (showEstadoPlanilla === activeTab "resumen").
-      visible: puedeCambiarEstado && showEstadoPlanilla,
+      // Solo en la pestaña Total Órdenes.
+      visible: puedeCambiarEstado && activeTab === "resumen",
       allowFiltering: false,
       allowHeaderFilter: false,
       allowSorting: false,
@@ -4569,6 +4620,7 @@ export default function PagosV2Page() {
       caption: "Estado planilla",
       width: 130,
       visible: showEstadoPlanilla,
+      ...(activeTab === "ficticio" ? { groupIndex: 0, sortOrder: "asc" as const } : {}),
       calculateCellValue: getEstadoPlanillaNombre,
       cellRender: (value, row) => {
         const rowTheme = getStateColor(row.estado);
@@ -4640,7 +4692,7 @@ export default function PagosV2Page() {
     // Columnas estables: cualquier setState de la página (contadores, suma por responsable, totales) ya no
     // obliga a DataGridPro a filtrar/ordenar/agrupar de nuevo todas las filas. Solo cambian con estos valores.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  ], [sumaRespMap, sumaRespLoading, showEstadoPlanilla, showTotalSitio, getEstadoPlanillaNombre, tipoCambioUsd, tipoCambioEur, tipoCambioDop, tipoCambioCop, puedeCambiarEstado, estadoOpciones]);
+  ], [sumaRespMap, sumaRespLoading, showEstadoPlanilla, showTotalSitio, getEstadoPlanillaNombre, tipoCambioUsd, tipoCambioEur, tipoCambioDop, tipoCambioCop, puedeCambiarEstado, estadoOpciones, activeTab]);
 
   return (
     <AppPage title="Pagos" fillHeight style={{ padding: "4px 8px 0" }}>
@@ -4672,7 +4724,7 @@ export default function PagosV2Page() {
               {PAGO_TABS.map(({ key, label, icon }) => {
                 const theme = TAB_THEME[key];
                 const selected = activeTab === key;
-                const disabled = key !== "resumen" && !canUseTab(key);
+                const disabled = key === "resumen" ? false : !canUseTab(key);
                 return (
                   <button
                     key={key}
@@ -4695,7 +4747,9 @@ export default function PagosV2Page() {
                   >
                     {icon}
                     {label}
-                    <span style={{ ...styles.pagoTabBadge, background: selected ? theme.accent : "#CBD5E1" }}>{tabStats[key]}</span>
+                    <span style={{ ...styles.pagoTabBadge, background: selected ? theme.accent : "#CBD5E1" }}>
+                      {key === "ficticio" ? (ficticioCargado || selected ? ficticioConteo : "–") : tabStats[key]}
+                    </span>
                   </button>
                 );
               })}

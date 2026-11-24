@@ -33,7 +33,8 @@ import type { ConstanteOption } from "../../../models/constante";
 import type { FiltroOperativoValue, TareaOption } from "../../../models/filtroOperativo";
 import type { EmpleadoCta } from "../../../models/empleadoCta";
 import type { ValoresGastoRequest, ValoresGastoResponse } from "../../../models/valoresGasto";
-import { getAuthUser } from "../../../utils/authStorage";
+import { getAuthUser, hasFullPageActionAccess } from "../../../utils/authStorage";
+import { seguridadPermisosAccionesService } from "../../seguridad/services/seguridadPermisosAccionesService";
 import { compressImageForUpload } from "../../../utils/imageCompression";
 import { SHAREPOINT_BASE_URL } from "../../../utils/sharepoint";
 import { abrirAdjunto, esCodigoLegacy } from "../../../utils/adjuntos";
@@ -1356,6 +1357,56 @@ export default function GastosAprobarPage() {
   const [selectedRowKey, setSelectedRowKey] = useState<string | null>(null);
   const [selectedRowKeys, setSelectedRowKeys] = useState<string[]>([]);
   const [activeInsightTab, setActiveInsightTab] = useState<"chart" | "detail">("chart");
+  // Todo activo por defecto; una fila activa con "ver" o "ejecutar" en NO bloquea ese elemento.
+  const [tabsBloqueados, setTabsBloqueados] = useState<Set<string>>(() => new Set());
+  const tabBloqueado = (clave: string) => tabsBloqueados.has(clave);
+
+  useEffect(() => {
+    const authUser = getAuthUser();
+    if (hasFullPageActionAccess(authUser)) {
+      return;
+    }
+
+    const ids = [...new Set([authUser?.codEmp, authUser?.idEmpleado]
+      .map((value) => Math.trunc(Number(value ?? 0)))
+      .filter((value) => Number.isFinite(value) && value > 0))];
+    let cancelled = false;
+
+    async function cargarRestricciones() {
+      try {
+        const conjuntos = await Promise.all(
+          ids.map((idEmpleado) =>
+            seguridadPermisosAccionesService.listar({ rutaPagina: "/finanzas/tesoreria/gastosaprobar", idEmpleado })
+          )
+        );
+        if (cancelled) return;
+
+        const restringidos = new Set<string>();
+        conjuntos.flat().forEach((permiso) => {
+          const clave = permiso.claveAccion?.trim().toLowerCase();
+          if (clave && permiso.idEmpleado && permiso.esActivo && (!permiso.puedeVer || !permiso.puedeEjecutar)) {
+            restringidos.add(clave);
+          }
+        });
+        setTabsBloqueados(restringidos);
+      } catch {
+        // Sin acceso a la tabla de permisos no se bloquea nada.
+      }
+    }
+
+    void cargarRestricciones();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (activeInsightTab === "chart" && tabsBloqueados.has("tab.distribucion") && !tabsBloqueados.has("tab.detalle")) {
+      setActiveInsightTab("detail");
+    } else if (activeInsightTab === "detail" && tabsBloqueados.has("tab.detalle") && !tabsBloqueados.has("tab.distribucion")) {
+      setActiveInsightTab("chart");
+    }
+  }, [activeInsightTab, tabsBloqueados]);
   const [filaActiva, setFilaActiva] = useState<GastoForm | null>(null);
   const [filaActivaKey, setFilaActivaKey] = useState<string | null>(null);
   const [resumenOcMinimizado, setResumenOcMinimizado] = useState(false);
@@ -3976,6 +4027,7 @@ export default function GastosAprobarPage() {
           flexWrap: "wrap",
         }}
       >
+        {!tabBloqueado("tab.distribucion") ? (
         <button
           type="button"
           onClick={() => setActiveInsightTab("chart")}
@@ -3994,6 +4046,8 @@ export default function GastosAprobarPage() {
         >
           Distribucion por solicitante
         </button>
+        ) : null}
+        {!tabBloqueado("tab.detalle") ? (
         <button
           type="button"
           onClick={() => setActiveInsightTab("detail")}
@@ -4010,6 +4064,7 @@ export default function GastosAprobarPage() {
         >
           Detalle
         </button>
+        ) : null}
       </div>
 
       {activeInsightTab === "chart" && solicitantePieData.length > 0 ? (

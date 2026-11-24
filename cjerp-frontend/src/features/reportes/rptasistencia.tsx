@@ -17,6 +17,8 @@ import {
   verificarLlamadaAtencionEnviadaHoyEnLote,
   previsualizarAsistenciaEmpleadoPdfLlamadaAtencion,
 } from "../../api/asistenciaService";
+import DataGridPro from "../../components/datagrid/DataGridPro";
+import type { GridColumn } from "../../components/datagrid/types";
 import { useConstantesPorCampo } from "../../hooks/useConstantesPorCampo";
 import type { AsistenciaReporteItem, AsistenciaReportePdfItem } from "../../models/asistencia";
 import type { AprobarCampoRow } from "../../models/aprobarCampo";
@@ -51,7 +53,8 @@ type SortKey =
   | "salida"
   | "tiempoHoras"
   | "totalHoras"
-  | "comentario";
+  | "comentario"
+  | "observacion";
 
 type SortState = {
   key: SortKey;
@@ -200,6 +203,7 @@ const tableColumns: TableColumn[] = [
   { key: "ubicacion", label: "Ubicacion", width: "170px" },
   { key: "estadoAct", label: "Estado activo/baja", width: "150px" },
   { key: "comentario", label: "Comentario", width: "260px" },
+  { key: "observacion", label: "Observacion", width: "260px" },
 ];
 
 const chartPalette = ["#2563EB", "#059669", "#F59E0B", "#DC2626", "#7C3AED", "#0EA5E9"];
@@ -685,6 +689,7 @@ function getExportRows(rows: AsistenciaReporteItem[]) {
     TiempoHoras: buildTiempoHorasDisplay(item),
     TotalHoras: Number(formatDecimal(item.totalHoras, 2).replace(/,/g, "")),
     Comentario: item.comentario,
+    Observacion: item.observacion,
   }));
 }
 
@@ -722,6 +727,21 @@ function mapAsistenciaRowToAprobarCampoRow(item: AsistenciaReporteItem): Aprobar
   };
 }
 
+type AsistenciaGridRow = AsistenciaReporteItem & { __key: string };
+
+function withRowKeys(rows: AsistenciaReporteItem[]): AsistenciaGridRow[] {
+  return rows.map((item, index) => ({
+    ...item,
+    __key: `${item.idEmpleado ?? item.nombreEmpleado}-${item.fecha}-${index}`,
+  }));
+}
+
+function toIsoDateKey(value: string) {
+  const parsed = parseDatabaseDate(value);
+  if (!parsed) return value;
+  return `${parsed.getFullYear()}-${String(parsed.getMonth() + 1).padStart(2, "0")}-${String(parsed.getDate()).padStart(2, "0")}`;
+}
+
 export default function RptAsistenciaPage() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -755,7 +775,8 @@ const [tiemposOverlayOpen, setTiemposOverlayOpen] = useState(false);
       | "empresa"
       | "cliente"
       | "area"
-      | "ubicacion";
+      | "ubicacion"
+      | "observacion";
     direction: "asc" | "desc";
   }>({
     key: "fecha",
@@ -1130,6 +1151,7 @@ const [tiemposOverlayOpen, setTiemposOverlayOpen] = useState(false);
     { key: "cliente", label: "Cliente", width: "170px" },
     { key: "area", label: "Area", width: "150px" },
     { key: "ubicacion", label: "Ubicacion", width: "160px" },
+    { key: "observacion", label: "Observacion", width: "260px" },
   ] as const;
   const tiemposStickyOffsets: Record<(typeof tiemposDetailColumns)[number]["key"], number | null> = {
     fecha: 0,
@@ -1143,6 +1165,7 @@ const [tiemposOverlayOpen, setTiemposOverlayOpen] = useState(false);
     cliente: null,
     area: null,
     ubicacion: null,
+    observacion: null,
   };
   const tiemposStickyLeftKeys = new Set<keyof AsistenciaReporteItem>(["fecha", "nombreEmpleado", "responsable", "hora"]);
 
@@ -1174,6 +1197,9 @@ const [tiemposOverlayOpen, setTiemposOverlayOpen] = useState(false);
       return compareValues(left.nombreEmpleado, right.nombreEmpleado);
     });
   }, [detailDrilldown, filteredRows, frontendFilters, shouldBuildDetalleView]);
+
+  const detalleGridRows = useMemo(() => withRowKeys(detailRows), [detailRows]);
+  const tiemposGridRows = useMemo(() => withRowKeys(tiemposDetailRows), [tiemposDetailRows]);
 
   const totals = useMemo(() => {
     const totalRegistros = filteredRows.length;
@@ -1355,6 +1381,7 @@ const [tiemposOverlayOpen, setTiemposOverlayOpen] = useState(false);
         salida: item.salida || "",
         area: item.area || "Sin area",
         estadoMarcacionTexto: item.estadoMarcacionTexto || item.estado || "Sin clasificar",
+        observacion: item.observacion || "",
       }))
       .filter((item) => (
         (!cuadrosDetailFilter.area || item.area === cuadrosDetailFilter.area) &&
@@ -1608,7 +1635,7 @@ const [tiemposOverlayOpen, setTiemposOverlayOpen] = useState(false);
     }
   };
 
-  const renderEditableTimeCell = (
+  const renderEditableTimeContent = (
     item: {
       key: string;
       idEmpleado: number | null;
@@ -1631,32 +1658,91 @@ const [tiemposOverlayOpen, setTiemposOverlayOpen] = useState(false);
     const error = detalleHoraErrors[rowKey];
 
     if (!canEdit) {
-      return <td style={{ ...styles.td, textAlign: "center" }}>{normalizedValue || "-"}</td>;
+      return <>{normalizedValue || "-"}</>;
     }
 
     return (
-      <td style={{ ...styles.td, textAlign: "center" }}>
-        <div style={styles.timeEditorStack}>
-          <input
-            type="time"
-            value={editValue}
-            onChange={(event) => handleDetalleHoraInputChange(item.key, field, event.target.value)}
-            style={styles.timeEditorInput}
-            disabled={saving}
-          />
-          <button
-            type="button"
-            style={styles.timeEditorButton}
-            onClick={() => void handleDetalleHoraSave(item, field)}
-            disabled={saving}
-          >
-            {saving ? "Guardando..." : "Guardar"}
-          </button>
-          {error ? <span style={styles.timeEditorError}>{error}</span> : null}
-        </div>
-      </td>
+      <div style={styles.timeEditorStack}>
+        <input
+          type="time"
+          value={editValue}
+          onChange={(event) => handleDetalleHoraInputChange(item.key, field, event.target.value)}
+          style={styles.timeEditorInput}
+          disabled={saving}
+        />
+        <button
+          type="button"
+          style={styles.timeEditorButton}
+          onClick={() => void handleDetalleHoraSave(item, field)}
+          disabled={saving}
+        >
+          {saving ? "Guardando..." : "Guardar"}
+        </button>
+        {error ? <span style={styles.timeEditorError}>{error}</span> : null}
+      </div>
     );
   };
+
+  const toEditableTimeItem = (item: AsistenciaGridRow) => ({
+    key: item.__key,
+    idEmpleado: item.idEmpleado ?? null,
+    fechaAsistenciaRaw: item.fecha,
+    fecha: formatDateLabel(item.fecha),
+    nombreEmpleado: item.nombreEmpleado,
+    hora: item.hora,
+    salida: item.salida,
+    estadoMarcacionTexto: item.estadoMarcacionTexto || item.estado || "Sin clasificar",
+    estado: item.estado,
+  });
+
+  const detalleGridColumns: GridColumn<AsistenciaGridRow>[] = [
+    { dataField: "fecha", caption: "Fecha", dataType: "date", width: 110, calculateCellValue: (row) => toIsoDateKey(row.fecha) },
+    { dataField: "nombreEmpleado", caption: "Nombre empleado", width: 250 },
+    { dataField: "tipoAprobacion", caption: "Tipo aprobacion", width: 180 },
+    { dataField: "responsable", caption: "Responsable", width: 220 },
+    {
+      dataField: "estadoMarcacionTexto",
+      caption: "Estado marcacion",
+      width: 170,
+      calculateCellValue: (row) => row.estadoMarcacionTexto || row.estado || "Sin clasificar",
+    },
+    {
+      dataField: "hora",
+      caption: "Hora entrada",
+      width: 140,
+      alignment: "center",
+      cellRender: (_value, row) => renderEditableTimeContent(toEditableTimeItem(row), "hora"),
+    },
+    {
+      dataField: "salida",
+      caption: "Hora salida",
+      width: 140,
+      alignment: "center",
+      cellRender: (_value, row) => renderEditableTimeContent(toEditableTimeItem(row), "salida"),
+    },
+    { dataField: "totalHoras", caption: "TotalHoras", dataType: "number", width: 110, format: { type: "fixedPoint", precision: 2 } },
+    { dataField: "empresa", caption: "Empresa", width: 180 },
+    { dataField: "cliente", caption: "Cliente", width: 190 },
+    { dataField: "area", caption: "Area", width: 160 },
+    { dataField: "ubicacion", caption: "Ubicacion", width: 170 },
+    { dataField: "estadoAct", caption: "Estado activo/baja", width: 150 },
+    { dataField: "comentario", caption: "Comentario", width: 260 },
+    { dataField: "observacion", caption: "Observacion", width: 260 },
+  ];
+
+  const tiemposGridColumns: GridColumn<AsistenciaGridRow>[] = [
+    { dataField: "fecha", caption: "Fecha", dataType: "date", width: 110, fixed: true, calculateCellValue: (row) => toIsoDateKey(row.fecha) },
+    { dataField: "nombreEmpleado", caption: "Empleado", width: 220, fixed: true },
+    { dataField: "responsable", caption: "Responsable", width: 200, fixed: true },
+    { dataField: "hora", caption: "Hora entrada", width: 105, alignment: "center", fixed: true },
+    { dataField: "salida", caption: "Salida", width: 105, alignment: "center" },
+    { dataField: "totalHoras", caption: "Total horas", dataType: "number", width: 110, format: { type: "fixedPoint", precision: 2 } },
+    { dataField: "empresa", caption: "Empresa", width: 170 },
+    { dataField: "cliente", caption: "Cliente", width: 170 },
+    { dataField: "area", caption: "Area", width: 150 },
+    { dataField: "ubicacion", caption: "Ubicacion", width: 160 },
+    { dataField: "observacion", caption: "Observacion", width: 260 },
+  ];
 
   const gerencialAreaSummaryRows = useMemo(() => {
     const grouped = new Map<string, { responsable: string; cliente: string; area: string; estadoMarcacionTexto: string; cantidad: number }>();
@@ -3624,8 +3710,6 @@ const [tiemposOverlayOpen, setTiemposOverlayOpen] = useState(false);
                     ) : null}
                     <SimpleCuadrosDetailGrid
                       data={cuadroDetalleRows}
-                    sortKey={cuadrosDetailSort.key}
-                    sortDirection={cuadrosDetailSort.direction}
                     estadoMarcacionOptions={estadoAsistenciaOptions}
                     estadoMarcacionValues={detalleEstadoEdits}
                     estadoMarcacionSaving={detalleEstadoSaving}
@@ -3637,11 +3721,6 @@ const [tiemposOverlayOpen, setTiemposOverlayOpen] = useState(false);
                     onHoraSave={handleDetalleHoraSave}
                     allowTimeEditing={isAdminRole}
                     showExtendedColumns
-                    extendedColumnFilters={gerencialDetailFilters}
-                    extendedColumnOptions={gerencialDetailFilterOptions}
-                      onExtendedColumnFilterChange={(key, value) =>
-                        setGerencialDetailFilters((prev) => ({ ...prev, [key]: value }))
-                      }
                       onClearExtendedFilters={() =>
                         {
                           setGerencialDetailFilters({
@@ -3658,12 +3737,6 @@ const [tiemposOverlayOpen, setTiemposOverlayOpen] = useState(false);
                             topResponsable: null,
                           });
                         }
-                      }
-                      onToggleSort={(key) =>
-                        setCuadrosDetailSort((prev) => ({
-                          key,
-                          direction: prev.key === key ? (prev.direction === "asc" ? "desc" : "asc") : "asc",
-                        }))
                       }
                     />
                   </ChartCard>
@@ -3944,79 +4017,19 @@ const [tiemposOverlayOpen, setTiemposOverlayOpen] = useState(false);
             </div>
           </div>
 
-          <div style={styles.tableWrap}>
-            <table style={styles.table}>
-              <colgroup>
-                {tableColumns.map((column) => (
-                  <col key={column.key} style={{ width: column.width }} />
-                ))}
-              </colgroup>
-              <thead>
-                <tr>
-                  {tableColumns.map((column) => (
-                    <th
-                      key={column.key}
-                      style={{ ...styles.th, textAlign: column.align ?? "left" }}
-                      onClick={() => toggleSort(column.key)}
-                    >
-                      <div style={styles.thContent}>
-                        <span>{column.label}</span>
-                        <span style={styles.sortPill}>
-                          {sortState.key === column.key ? (sortState.direction === "asc" ? "ASC" : "DESC") : "ORD"}
-                        </span>
-                      </div>
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {loading ? (
-                  <tr>
-                    <td style={styles.emptyCell} colSpan={tableColumns.length}>Cargando reporte de asistencia...</td>
-                  </tr>
-                ) : detailRows.length === 0 ? (
-                  <tr>
-                    <td style={styles.emptyCell} colSpan={tableColumns.length}>
-                      {rows.length === 0 ? "No hay datos para el rango seleccionado." : "No hay registros que coincidan con los filtros actuales o la seleccion de cuadros."}
-                    </td>
-                  </tr>
-                  ) : (
-                    detailRows.map((item, index) => {
-                      const editableItem = {
-                        key: `${item.idEmpleado ?? item.nombreEmpleado}-${item.fecha}-${index}`,
-                        idEmpleado: item.idEmpleado ?? null,
-                        fechaAsistenciaRaw: item.fecha,
-                        fecha: formatDateLabel(item.fecha),
-                        nombreEmpleado: item.nombreEmpleado,
-                        hora: item.hora,
-                        salida: item.salida,
-                        estadoMarcacionTexto: item.estadoMarcacionTexto || item.estado || "Sin clasificar",
-                        estado: item.estado,
-                      };
-
-                      return (
-                        <tr key={editableItem.key} style={{ ...styles.tr, background: getRowTone(item) }}>
-                          <td style={styles.td}>{editableItem.fecha}</td>
-                          <td style={styles.td}>{editableItem.nombreEmpleado}</td>
-                          <td style={styles.td}>{item.tipoAprobacion}</td>
-                          <td style={styles.td}>{item.responsable}</td>
-                          <td style={styles.td}>{editableItem.estadoMarcacionTexto}</td>
-                          {renderEditableTimeCell(editableItem, "hora")}
-                          {renderEditableTimeCell(editableItem, "salida")}
-                          <td style={{ ...styles.td, textAlign: "right" }}>{formatDecimal(item.totalHoras, 2)}</td>
-                          <td style={styles.td}>{item.empresa}</td>
-                          <td style={styles.td}>{item.cliente}</td>
-                          <td style={styles.td}>{item.area}</td>
-                          <td style={styles.td}>{item.ubicacion}</td>
-                          <td style={styles.td}>{item.estadoAct}</td>
-                          <td style={styles.td}>{item.comentario}</td>
-                        </tr>
-                      );
-                    })
-                )}
-              </tbody>
-            </table>
-          </div>
+          <DataGridPro<AsistenciaGridRow>
+            dataSource={detalleGridRows}
+            columns={detalleGridColumns}
+            keyExpr="__key"
+            height={620}
+            loading={loading}
+            noDataText={rows.length === 0 ? "No hay datos para el rango seleccionado." : "No hay registros que coincidan con los filtros actuales o la seleccion de cuadros."}
+            rowBackground={(row, focused) => (focused ? "#DBEAFE" : getRowTone(row))}
+            paging={{ pageSize: 100, pageSizes: [25, 50, 100, 200] }}
+            exportFileName="Asistencia_detalle"
+            stateStoringKey="rptasistencia-detalle"
+            rowPadding="4px 8px"
+          />
         </section>
       ) : null}
 
@@ -4132,98 +4145,20 @@ const [tiemposOverlayOpen, setTiemposOverlayOpen] = useState(false);
                 </button>
                 <span style={styles.counterPill}>{tiemposDetailRows.length} registros visibles</span>
               </div>
-              <div style={{ ...styles.tableWrap, height: tiemposViewportHeight }}>
-                <table style={styles.table}>
-                  <colgroup>
-                    {tiemposDetailColumns.map((column) => (
-                      <col key={String(column.key)} style={{ width: column.width }} />
-                    ))}
-                  </colgroup>
-                  <thead>
-                    <tr>
-                      {tiemposDetailColumns.map((column) => (
-                        <th
-                          key={String(column.key)}
-                          style={{
-                            ...styles.th,
-                            textAlign: column.align ?? "left",
-                            cursor: "pointer",
-                            ...(tiemposStickyOffsets[column.key] !== null
-                              ? {
-                                  position: "sticky",
-                                  left: tiemposStickyOffsets[column.key] ?? 0,
-                                  zIndex: 3,
-                                  background: "#F8FAFC",
-                                }
-                              : {}),
-                          }}
-                          onClick={() =>
-                            setTiemposSort((prev) => ({
-                              key: column.key,
-                              direction: prev.key === column.key ? (prev.direction === "asc" ? "desc" : "asc") : "asc",
-                            }))
-                          }
-                        >
-                          <div style={styles.thContent}>
-                            <span>{column.label}</span>
-                            <span style={styles.sortPill}>
-                              {tiemposSort.key === column.key ? (tiemposSort.direction === "asc" ? "ASC" : "DESC") : "ORD"}
-                            </span>
-                          </div>
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {loading ? (
-                      <tr>
-                        <td style={styles.emptyCell} colSpan={tiemposDetailColumns.length}>Cargando tiempos...</td>
-                      </tr>
-                    ) : tiemposDetailRows.length === 0 ? (
-                      <tr>
-                        <td style={styles.emptyCell} colSpan={tiemposDetailColumns.length}>
-                          No hay registros para el estado y rango seleccionados.
-                        </td>
-                      </tr>
-                    ) : (
-                      tiemposDetailRows.map((item, index) => (
-                        <tr key={`${item.idEmpleado ?? item.nombreEmpleado}-${item.fecha}-${index}`} style={{ ...styles.tr, background: getRowTone(item) }}>
-                          {tiemposDetailColumns.map((column) => {
-                            const rawValue = item[column.key as keyof AsistenciaReporteItem];
-                            let displayValue = rawValue ?? "";
-
-                            if (column.key === "fecha") {
-                              displayValue = formatDateLabel(String(rawValue ?? ""));
-                            } else if (column.key === "totalHoras") {
-                              displayValue = formatDecimal(Number(rawValue ?? 0), 2);
-                            }
-
-                            return (
-                              <td
-                                key={`${String(column.key)}-${index}`}
-                                style={{
-                                  ...styles.td,
-                                  textAlign: column.align ?? "left",
-                                  ...(tiemposStickyLeftKeys.has(column.key as keyof AsistenciaReporteItem)
-                                    ? {
-                                        position: "sticky",
-                                        left: tiemposStickyOffsets[column.key] ?? 0,
-                                        zIndex: 2,
-                                        background: getRowTone(item),
-                                      }
-                                    : {}),
-                                }}
-                              >
-                                {String(displayValue || "")}
-                              </td>
-                            );
-                          })}
-                        </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
-              </div>
+              <DataGridPro<AsistenciaGridRow>
+                dataSource={tiemposGridRows}
+                columns={tiemposGridColumns}
+                keyExpr="__key"
+                height={tiemposViewportHeight}
+                loading={loading}
+                noDataText="No hay registros para el estado y rango seleccionados."
+                showGroupPanel={false}
+                rowBackground={(row, focused) => (focused ? "#DBEAFE" : getRowTone(row))}
+                paging={{ pageSize: 100, pageSizes: [25, 50, 100, 200] }}
+                exportFileName="Asistencia_tiempos"
+                stateStoringKey="rptasistencia-tiempos"
+                rowPadding="4px 8px"
+              />
             </div>
           </div>
         </section>
@@ -4261,98 +4196,20 @@ const [tiemposOverlayOpen, setTiemposOverlayOpen] = useState(false);
                   Estado seleccionado: {tiemposEstado === ALL_OPTION ? "Todos" : tiemposEstado}
                 </span>
               </div>
-              <div style={{ ...styles.tableWrap, height: "100%", flex: 1, minHeight: 0 }}>
-                <table style={styles.table}>
-                  <colgroup>
-                    {tiemposDetailColumns.map((column) => (
-                      <col key={String(column.key)} style={{ width: column.width }} />
-                    ))}
-                  </colgroup>
-                  <thead>
-                    <tr>
-                      {tiemposDetailColumns.map((column) => (
-                        <th
-                          key={String(column.key)}
-                          style={{
-                            ...styles.th,
-                            textAlign: column.align ?? "left",
-                            cursor: "pointer",
-                            ...(tiemposStickyOffsets[column.key] !== null
-                              ? {
-                                  position: "sticky",
-                                  left: tiemposStickyOffsets[column.key] ?? 0,
-                                  zIndex: 3,
-                                  background: "#F8FAFC",
-                                }
-                              : {}),
-                          }}
-                          onClick={() =>
-                            setTiemposSort((prev) => ({
-                              key: column.key,
-                              direction: prev.key === column.key ? (prev.direction === "asc" ? "desc" : "asc") : "asc",
-                            }))
-                          }
-                        >
-                          <div style={styles.thContent}>
-                            <span>{column.label}</span>
-                            <span style={styles.sortPill}>
-                              {tiemposSort.key === column.key ? (tiemposSort.direction === "asc" ? "ASC" : "DESC") : "ORD"}
-                            </span>
-                          </div>
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {loading ? (
-                      <tr>
-                        <td style={styles.emptyCell} colSpan={tiemposDetailColumns.length}>Cargando tiempos...</td>
-                      </tr>
-                    ) : tiemposDetailRows.length === 0 ? (
-                      <tr>
-                        <td style={styles.emptyCell} colSpan={tiemposDetailColumns.length}>
-                          No hay registros para el estado y rango seleccionados.
-                        </td>
-                      </tr>
-                    ) : (
-                      tiemposDetailRows.map((item, index) => (
-                        <tr key={`${item.idEmpleado ?? item.nombreEmpleado}-${item.fecha}-${index}`} style={{ ...styles.tr, background: getRowTone(item) }}>
-                          {tiemposDetailColumns.map((column) => {
-                            const rawValue = item[column.key as keyof AsistenciaReporteItem];
-                            let displayValue = rawValue ?? "";
-
-                            if (column.key === "fecha") {
-                              displayValue = formatDateLabel(String(rawValue ?? ""));
-                            } else if (column.key === "totalHoras") {
-                              displayValue = formatDecimal(Number(rawValue ?? 0), 2);
-                            }
-
-                            return (
-                              <td
-                                key={`${String(column.key)}-${index}`}
-                                style={{
-                                  ...styles.td,
-                                  textAlign: column.align ?? "left",
-                                  ...(tiemposStickyLeftKeys.has(column.key as keyof AsistenciaReporteItem)
-                                    ? {
-                                        position: "sticky",
-                                        left: tiemposStickyOffsets[column.key] ?? 0,
-                                        zIndex: 2,
-                                        background: getRowTone(item),
-                                      }
-                                    : {}),
-                                }}
-                              >
-                                {String(displayValue || "")}
-                              </td>
-                            );
-                          })}
-                        </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
-              </div>
+              <DataGridPro<AsistenciaGridRow>
+                dataSource={tiemposGridRows}
+                columns={tiemposGridColumns}
+                keyExpr="__key"
+                height="fill"
+                loading={loading}
+                noDataText="No hay registros para el estado y rango seleccionados."
+                showGroupPanel={false}
+                rowBackground={(row, focused) => (focused ? "#DBEAFE" : getRowTone(row))}
+                paging={{ pageSize: 100, pageSizes: [25, 50, 100, 200] }}
+                exportFileName="Asistencia_tiempos"
+                stateStoringKey="rptasistencia-tiempos"
+                rowPadding="4px 8px"
+              />
             </div>
           </div>
         </div>
@@ -4594,8 +4451,6 @@ const [tiemposOverlayOpen, setTiemposOverlayOpen] = useState(false);
                   ) : null}
                   <SimpleCuadrosDetailGrid
                     data={cuadroDetalleRows}
-                    sortKey={cuadrosDetailSort.key}
-                    sortDirection={cuadrosDetailSort.direction}
                     estadoMarcacionOptions={estadoAsistenciaOptions}
                     estadoMarcacionValues={detalleEstadoEdits}
                     estadoMarcacionSaving={detalleEstadoSaving}
@@ -4607,11 +4462,6 @@ const [tiemposOverlayOpen, setTiemposOverlayOpen] = useState(false);
                     onHoraSave={handleDetalleHoraSave}
                     allowTimeEditing={isAdminRole}
                     showExtendedColumns
-                    extendedColumnFilters={gerencialDetailFilters}
-                    extendedColumnOptions={gerencialDetailFilterOptions}
-                    onExtendedColumnFilterChange={(key, value) =>
-                      setGerencialDetailFilters((prev) => ({ ...prev, [key]: value }))
-                    }
                     onClearExtendedFilters={() =>
                       {
                         setGerencialDetailFilters({
@@ -4628,12 +4478,6 @@ const [tiemposOverlayOpen, setTiemposOverlayOpen] = useState(false);
                           topResponsable: null,
                         });
                       }
-                    }
-                    onToggleSort={(key) =>
-                      setCuadrosDetailSort((prev) => ({
-                        key,
-                        direction: prev.key === key ? (prev.direction === "asc" ? "desc" : "asc") : "asc",
-                      }))
                     }
                     expanded
                   />
@@ -6931,10 +6775,27 @@ function SimpleAreaStateBars({
   );
 }
 
+type CuadrosDetailGridItem = {
+  key: string;
+  idEmpleado: number | null;
+  fechaAsistenciaRaw: string;
+  fecha: string;
+  nombreEmpleado: string;
+  responsable: string;
+  empresa: string;
+  cliente: string;
+  proyecto: string;
+  site: string;
+  ubicacion: string;
+  hora: string;
+  salida: string;
+  area: string;
+  estadoMarcacionTexto: string;
+  observacion: string;
+};
+
 function SimpleCuadrosDetailGrid({
   data,
-  sortKey,
-  sortDirection,
   estadoMarcacionOptions,
   estadoMarcacionValues,
   estadoMarcacionSaving,
@@ -6946,32 +6807,10 @@ function SimpleCuadrosDetailGrid({
   onHoraSave,
   allowTimeEditing = false,
   showExtendedColumns,
-  extendedColumnFilters,
-  extendedColumnOptions,
-  onExtendedColumnFilterChange,
   onClearExtendedFilters,
-  onToggleSort,
   expanded,
 }: {
-  data: Array<{
-    key: string;
-    idEmpleado: number | null;
-    fechaAsistenciaRaw: string;
-    fecha: string;
-    nombreEmpleado: string;
-    responsable: string;
-    empresa: string;
-    cliente: string;
-    proyecto: string;
-    site: string;
-    ubicacion: string;
-    hora: string;
-    salida: string;
-    area: string;
-    estadoMarcacionTexto: string;
-  }>;
-  sortKey: CuadrosDetailSortKey;
-  sortDirection: "asc" | "desc";
+  data: CuadrosDetailGridItem[];
   estadoMarcacionOptions: Array<{ idEstado: number; value: string; label: string }>;
   estadoMarcacionValues: Record<string, string>;
   estadoMarcacionSaving: Record<string, boolean>;
@@ -6999,378 +6838,142 @@ function SimpleCuadrosDetailGrid({
   ) => void;
   allowTimeEditing?: boolean;
   showExtendedColumns?: boolean;
-  extendedColumnFilters?: GerencialDetailFilters;
-  extendedColumnOptions?: Record<keyof GerencialDetailFilters, string[]>;
-  onExtendedColumnFilterChange?: (key: keyof GerencialDetailFilters, value: string[]) => void;
   onClearExtendedFilters?: () => void;
-  onToggleSort: (key: CuadrosDetailSortKey) => void;
   expanded?: boolean;
 }) {
-  const [page, setPage] = useState(1);
-  const totalPages = Math.max(1, Math.ceil(data.length / DETALLE_FILTRADO_PAGE_SIZE));
-  const currentPage = Math.min(page, totalPages);
-  const firstRowIndex = (currentPage - 1) * DETALLE_FILTRADO_PAGE_SIZE;
-  const visibleRows = data.slice(firstRowIndex, firstRowIndex + DETALLE_FILTRADO_PAGE_SIZE);
+  const renderTimeCell = (item: CuadrosDetailGridItem, field: "hora" | "salida") => {
+    const rowKey = `${item.key}:${field}`;
+    const value = String(item[field] ?? "").trim();
+    if (!allowTimeEditing) return value;
 
-  useEffect(() => {
-    setPage(1);
-  }, [data]);
+    const editValue = horaValues[rowKey] ?? toTimeInputValue(value);
+    const saving = Boolean(horaSaving[rowKey]);
+    const error = horaErrors[rowKey];
 
-  const renderSortPill = (key: CuadrosDetailSortKey) =>
-    sortKey === key ? (sortDirection === "asc" ? "ASC" : "DESC") : "ORD";
+    return (
+      <div style={styles.timeEditorStack}>
+        <input
+          type="time"
+          value={editValue}
+          onChange={(event) => onHoraInputChange(item.key, field, event.target.value)}
+          style={styles.timeEditorInput}
+          disabled={saving}
+        />
+        <button
+          type="button"
+          style={styles.timeEditorButton}
+          onClick={() => void onHoraSave(item, field)}
+          disabled={saving}
+        >
+          {saving ? "Guardando..." : "Guardar"}
+        </button>
+        {error ? <span style={styles.timeEditorError}>{error}</span> : null}
+      </div>
+    );
+  };
+
+  const renderEstadoCell = (item: CuadrosDetailGridItem) => {
+    const matchedOption = estadoMarcacionOptions.find((option) =>
+      option.label.trim().toUpperCase() === item.estadoMarcacionTexto.trim().toUpperCase() ||
+      option.value.trim().toUpperCase() === item.estadoMarcacionTexto.trim().toUpperCase()
+    );
+    const selectedValue = estadoMarcacionValues[item.key] ?? matchedOption?.value ?? item.estadoMarcacionTexto;
+    const isSaving = Boolean(estadoMarcacionSaving[item.key]);
+
+    return (
+      <select
+        value={selectedValue}
+        onChange={(event) => onEstadoMarcacionChange(item, event.target.value)}
+        style={styles.cuadrosDetailSelect}
+        disabled={isSaving}
+      >
+        {estadoMarcacionOptions.length === 0 ? (
+          <option value={item.estadoMarcacionTexto}>{item.estadoMarcacionTexto}</option>
+        ) : null}
+        {!estadoMarcacionOptions.some((option) => option.value === selectedValue) ? (
+          <option value={item.estadoMarcacionTexto}>{item.estadoMarcacionTexto}</option>
+        ) : null}
+        {estadoMarcacionOptions.map((option) => (
+          <option key={`${item.key}-${option.value}`} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+    );
+  };
+
+  const columns: GridColumn<CuadrosDetailGridItem>[] = [
+    {
+      dataField: "fecha",
+      caption: "Fecha",
+      dataType: "date",
+      width: 110,
+      calculateCellValue: (row) => toIsoDateKey(row.fechaAsistenciaRaw),
+    },
+    { dataField: "nombreEmpleado", caption: "Nombre empleado", minWidth: 220 },
+    ...(showExtendedColumns ? [{ dataField: "responsable", caption: "Responsable", minWidth: 200 }] : []),
+    {
+      dataField: "hora",
+      caption: "Hora entrada",
+      width: allowTimeEditing ? 150 : 110,
+      alignment: "center" as const,
+      cellRender: (_value, row) => renderTimeCell(row, "hora"),
+    },
+    {
+      dataField: "salida",
+      caption: "Salida",
+      width: allowTimeEditing ? 150 : 110,
+      alignment: "center" as const,
+      cellRender: (_value, row) => renderTimeCell(row, "salida"),
+    },
+    {
+      dataField: "estadoMarcacionTexto",
+      caption: "Estado marcacion",
+      width: 190,
+      cellRender: (_value, row) => renderEstadoCell(row),
+    },
+    ...(showExtendedColumns
+      ? [
+          { dataField: "cliente", caption: "Cliente", minWidth: 180 },
+          { dataField: "empresa", caption: "Empresa", minWidth: 160 },
+        ]
+      : []),
+    { dataField: "area", caption: "Area", width: 150 },
+    { dataField: "ubicacion", caption: "Ubicacion", minWidth: 160 },
+    ...(showExtendedColumns
+      ? [
+          { dataField: "proyecto", caption: "Proyecto", minWidth: 160 },
+          { dataField: "site", caption: "Site", minWidth: 140 },
+        ]
+      : []),
+    { dataField: "observacion", caption: "Observacion", minWidth: 260 },
+  ];
 
   return (
     <div style={styles.cuadrosDetailWrap}>
       {data.length === 0 ? (
         <div style={styles.emptyMiniState}>Sin registros para mostrar.</div>
       ) : (
-        <>
-        <div style={expanded ? { ...styles.cuadrosDetailScroller, ...styles.cuadrosDetailScrollerExpanded } : styles.cuadrosDetailScroller}>
-          <table style={styles.cuadrosDetailTable}>
-            <thead>
-              <tr>
-                <th style={styles.cuadrosDetailTh} onClick={() => onToggleSort("fecha")}>
-                  <div style={styles.cuadrosDetailThContent}><span>Fecha</span><span style={styles.cuadrosDetailSortPill}>{renderSortPill("fecha")}</span></div>
-                </th>
-                <th style={styles.cuadrosDetailTh} onClick={() => onToggleSort("nombreEmpleado")}>
-                  <div style={styles.cuadrosDetailThContent}><span>Nombre empleado</span><span style={styles.cuadrosDetailSortPill}>{renderSortPill("nombreEmpleado")}</span></div>
-                </th>
-                {showExtendedColumns ? (
-                  <th style={styles.cuadrosDetailTh} onClick={() => onToggleSort("responsable")}>
-                    <div style={styles.cuadrosDetailThContent}><span>Responsable</span><span style={styles.cuadrosDetailSortPill}>{renderSortPill("responsable")}</span></div>
-                  </th>
-                ) : null}
-                <th style={styles.cuadrosDetailTh} onClick={() => onToggleSort("hora")}>
-                  <div style={styles.cuadrosDetailThContent}><span>Hora entrada</span><span style={styles.cuadrosDetailSortPill}>{renderSortPill("hora")}</span></div>
-                </th>
-                <th style={styles.cuadrosDetailTh} onClick={() => onToggleSort("salida")}>
-                  <div style={styles.cuadrosDetailThContent}><span>Salida</span><span style={styles.cuadrosDetailSortPill}>{renderSortPill("salida")}</span></div>
-                </th>
-                <th style={styles.cuadrosDetailTh} onClick={() => onToggleSort("estadoMarcacionTexto")}>
-                  <div style={styles.cuadrosDetailThContent}><span>Estado marcacion</span><span style={styles.cuadrosDetailSortPill}>{renderSortPill("estadoMarcacionTexto")}</span></div>
-                </th>
-                {showExtendedColumns ? (
-                  <th style={styles.cuadrosDetailTh} onClick={() => onToggleSort("cliente")}>
-                    <div style={styles.cuadrosDetailThContent}><span>Cliente</span><span style={styles.cuadrosDetailSortPill}>{renderSortPill("cliente")}</span></div>
-                  </th>
-                ) : null}
-                {showExtendedColumns ? (
-                  <th style={styles.cuadrosDetailTh} onClick={() => onToggleSort("empresa")}>
-                    <div style={styles.cuadrosDetailThContent}><span>Empresa</span><span style={styles.cuadrosDetailSortPill}>{renderSortPill("empresa")}</span></div>
-                  </th>
-                ) : null}
-                <th style={styles.cuadrosDetailTh} onClick={() => onToggleSort("area")}>
-                  <div style={styles.cuadrosDetailThContent}><span>Area</span><span style={styles.cuadrosDetailSortPill}>{renderSortPill("area")}</span></div>
-                </th>
-                {showExtendedColumns ? (
-                  <th style={styles.cuadrosDetailTh} onClick={() => onToggleSort("ubicacion")}>
-                    <div style={styles.cuadrosDetailThContent}><span>Ubicacion</span><span style={styles.cuadrosDetailSortPill}>{renderSortPill("ubicacion")}</span></div>
-                  </th>
-                ) : null}
-                {showExtendedColumns ? (
-                  <th style={styles.cuadrosDetailTh} onClick={() => onToggleSort("proyecto")}>
-                    <div style={styles.cuadrosDetailThContent}><span>Proyecto</span><span style={styles.cuadrosDetailSortPill}>{renderSortPill("proyecto")}</span></div>
-                  </th>
-                ) : null}
-                {showExtendedColumns ? (
-                  <th style={styles.cuadrosDetailTh} onClick={() => onToggleSort("site")}>
-                    <div style={styles.cuadrosDetailThContent}><span>Site</span><span style={styles.cuadrosDetailSortPill}>{renderSortPill("site")}</span></div>
-                  </th>
-                ) : null}
-              </tr>
-              {showExtendedColumns && extendedColumnFilters && extendedColumnOptions && onExtendedColumnFilterChange ? (
-                <tr>
-                  <th style={styles.cuadrosDetailFilterTh}>
-                    {onClearExtendedFilters ? (
-                      <button type="button" style={styles.cuadrosDetailClearButton} onClick={onClearExtendedFilters}>
-                        Limpiar
-                      </button>
-                    ) : null}
-                  </th>
-                  <th style={styles.cuadrosDetailFilterTh}>
-                    <HeaderCheckboxFilter
-                      values={extendedColumnFilters.nombreEmpleado}
-                      options={extendedColumnOptions.nombreEmpleado}
-                      onChange={(value) => onExtendedColumnFilterChange("nombreEmpleado", value)}
-                    />
-                  </th>
-                  <th style={styles.cuadrosDetailFilterTh}>
-                    <HeaderCheckboxFilter
-                      values={extendedColumnFilters.responsable}
-                      options={extendedColumnOptions.responsable}
-                      onChange={(value) => onExtendedColumnFilterChange("responsable", value)}
-                    />
-                  </th>
-                  <th style={styles.cuadrosDetailFilterTh} />
-                  <th style={styles.cuadrosDetailFilterTh} />
-                  <th style={styles.cuadrosDetailFilterTh}>
-                    <HeaderCheckboxFilter
-                      values={extendedColumnFilters.estadoMarcacion}
-                      options={extendedColumnOptions.estadoMarcacion}
-                      onChange={(value) => onExtendedColumnFilterChange("estadoMarcacion", value)}
-                    />
-                  </th>
-                  <th style={styles.cuadrosDetailFilterTh}>
-                    <HeaderCheckboxFilter
-                      values={extendedColumnFilters.cliente}
-                      options={extendedColumnOptions.cliente}
-                      onChange={(value) => onExtendedColumnFilterChange("cliente", value)}
-                    />
-                  </th>
-                  <th style={styles.cuadrosDetailFilterTh} />
-                  <th style={styles.cuadrosDetailFilterTh} />
-                  <th style={styles.cuadrosDetailFilterTh} />
-                  <th style={styles.cuadrosDetailFilterTh}>
-                    <HeaderCheckboxFilter
-                      values={extendedColumnFilters.proyecto}
-                      options={extendedColumnOptions.proyecto}
-                      onChange={(value) => onExtendedColumnFilterChange("proyecto", value)}
-                    />
-                  </th>
-                  <th style={styles.cuadrosDetailFilterTh}>
-                    <HeaderCheckboxFilter
-                      values={extendedColumnFilters.site}
-                      options={extendedColumnOptions.site}
-                      onChange={(value) => onExtendedColumnFilterChange("site", value)}
-                    />
-                  </th>
-                  <th style={styles.cuadrosDetailFilterTh} />
-                </tr>
-              ) : null}
-            </thead>
-            <tbody>
-              {visibleRows.map((item) => (
-                <tr key={item.key}>
-                  <td style={{
-                    ...styles.cuadrosDetailTd,
-                    maxWidth: 90,
-                    minWidth: 70,
-                    width: 90,
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                    whiteSpace: "nowrap",
-                  }}
-                    title={item.fecha}
-                  >
-                    {item.fecha}
-                  </td>
-                  <td style={{
-                    ...styles.cuadrosDetailTd,
-                    maxWidth: 160,
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                    whiteSpace: "nowrap",
-                    verticalAlign: "top",
-                  }}
-                    title={item.nombreEmpleado}
-                  >
-                    {item.nombreEmpleado}
-                  </td>
-                  {showExtendedColumns ? (
-                    <td style={{
-                      ...styles.cuadrosDetailTd,
-                      maxWidth: 160,
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                      whiteSpace: "nowrap",
-                      verticalAlign: "top",
-                    }}
-                      title={item.responsable}
-                    >
-                      {item.responsable}
-                    </td>
-                  ) : null}
-                  {(() => {
-                    const rowKey = `${item.key}:hora`;
-                    const value = String(item.hora ?? "").trim();
-                    const canEdit = allowTimeEditing;
-                    const editValue = horaValues[rowKey] ?? toTimeInputValue(value);
-                    const saving = Boolean(horaSaving[rowKey]);
-                    const error = horaErrors[rowKey];
-
-                    return (
-                      <td style={{ ...styles.cuadrosDetailTd, textAlign: "center" }}>
-                        {canEdit ? (
-                          <div style={styles.timeEditorStack}>
-                            <input
-                              type="time"
-                              value={editValue}
-                              onChange={(event) => onHoraInputChange(item.key, "hora", event.target.value)}
-                              style={styles.timeEditorInput}
-                              disabled={saving}
-                            />
-                            <button
-                              type="button"
-                              style={styles.timeEditorButton}
-                              onClick={() => void onHoraSave(item, "hora")}
-                              disabled={saving}
-                            >
-                              {saving ? "Guardando..." : "Guardar"}
-                            </button>
-                            {error ? <span style={styles.timeEditorError}>{error}</span> : null}
-                          </div>
-                        ) : (
-                          value
-                        )}
-                      </td>
-                    );
-                  })()}
-                  {(() => {
-                    const rowKey = `${item.key}:salida`;
-                    const value = String(item.salida ?? "").trim();
-                    const canEdit = allowTimeEditing;
-                    const editValue = horaValues[rowKey] ?? toTimeInputValue(value);
-                    const saving = Boolean(horaSaving[rowKey]);
-                    const error = horaErrors[rowKey];
-
-                    return (
-                      <td style={{ ...styles.cuadrosDetailTd, textAlign: "center" }}>
-                        {canEdit ? (
-                          <div style={styles.timeEditorStack}>
-                            <input
-                              type="time"
-                              value={editValue}
-                              onChange={(event) => onHoraInputChange(item.key, "salida", event.target.value)}
-                              style={styles.timeEditorInput}
-                              disabled={saving}
-                            />
-                            <button
-                              type="button"
-                              style={styles.timeEditorButton}
-                              onClick={() => void onHoraSave(item, "salida")}
-                              disabled={saving}
-                            >
-                              {saving ? "Guardando..." : "Guardar"}
-                            </button>
-                            {error ? <span style={styles.timeEditorError}>{error}</span> : null}
-                          </div>
-                        ) : (
-                          value
-                        )}
-                      </td>
-                    );
-                  })()}
-                  <td style={styles.cuadrosDetailTd}>
-                    {(() => {
-                      const matchedOption = estadoMarcacionOptions.find((option) =>
-                        option.label.trim().toUpperCase() === item.estadoMarcacionTexto.trim().toUpperCase() ||
-                        option.value.trim().toUpperCase() === item.estadoMarcacionTexto.trim().toUpperCase()
-                      );
-                      const selectedValue = estadoMarcacionValues[item.key] ?? matchedOption?.value ?? item.estadoMarcacionTexto;
-                      const isSaving = Boolean(estadoMarcacionSaving[item.key]);
-
-                      return (
-                    <select
-                      value={selectedValue}
-                      onChange={(event) => onEstadoMarcacionChange(item, event.target.value)}
-                      style={styles.cuadrosDetailSelect}
-                      disabled={isSaving}
-                    >
-                      {estadoMarcacionOptions.length === 0 ? (
-                        <option value={item.estadoMarcacionTexto}>{item.estadoMarcacionTexto}</option>
-                      ) : null}
-                      {!estadoMarcacionOptions.some((option) => option.value === selectedValue) ? (
-                        <option value={item.estadoMarcacionTexto}>{item.estadoMarcacionTexto}</option>
-                      ) : null}
-                      {estadoMarcacionOptions.map((option) => (
-                        <option key={`${item.key}-${option.value}`} value={option.value}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
-                      );
-                    })()}
-                  </td>
-                  {showExtendedColumns ? <td style={styles.cuadrosDetailTd}>{item.cliente}</td> : null}
-                  {showExtendedColumns ? <td style={styles.cuadrosDetailTd}>{item.empresa}</td> : null}
-                  <td style={styles.cuadrosDetailTd}>{item.area}</td>
-                  <td style={styles.cuadrosDetailTd}>{item.ubicacion}</td>
-                  {showExtendedColumns ? <td style={styles.cuadrosDetailTd}>{item.proyecto}</td> : null}
-                  {showExtendedColumns ? <td style={styles.cuadrosDetailTd}>{item.site}</td> : null}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        <div style={styles.detailPagination}>
-          <span>
-            Mostrando {firstRowIndex + 1}-{Math.min(firstRowIndex + visibleRows.length, data.length)} de {data.length} registro
-            {data.length === 1 ? "" : "s"}
-          </span>
-          <div style={styles.detailPaginationActions}>
-            <button
-              type="button"
-              style={styles.detailPaginationButton}
-              onClick={() => setPage((current) => Math.max(1, current - 1))}
-              disabled={currentPage === 1}
-            >
-              Anterior
-            </button>
-            <span>Página {currentPage} de {totalPages}</span>
-            <button
-              type="button"
-              style={styles.detailPaginationButton}
-              onClick={() => setPage((current) => Math.min(totalPages, current + 1))}
-              disabled={currentPage === totalPages}
-            >
-              Siguiente
-            </button>
-          </div>
-        </div>
-        </>
+        <DataGridPro<CuadrosDetailGridItem>
+          dataSource={data}
+          columns={columns}
+          keyExpr="key"
+          height={expanded ? "fill" : 312}
+          showGroupPanel={false}
+          paging={{ pageSize: DETALLE_FILTRADO_PAGE_SIZE, pageSizes: [25, 50, 100, 200] }}
+          exportFileName="Asistencia_detalle_filtrado"
+          stateStoringKey={showExtendedColumns ? "rptasistencia-cuadros-detalle-ext" : "rptasistencia-cuadros-detalle"}
+          rowPadding="4px 8px"
+          toolbarExtra={
+            onClearExtendedFilters ? (
+              <button type="button" style={{ ...styles.cuadrosDetailClearButton, width: "auto" }} onClick={onClearExtendedFilters}>
+                Limpiar seleccion
+              </button>
+            ) : null
+          }
+        />
       )}
     </div>
-  );
-}
-
-function HeaderCheckboxFilter({
-  values,
-  options,
-  onChange,
-}: {
-  values: string[];
-  options: string[];
-  onChange: (values: string[]) => void;
-}) {
-  const summary = values.length === 0
-    ? "Todos"
-    : values.length === 1
-      ? values[0]
-      : `${values.length} seleccionados`;
-
-  return (
-    <details style={styles.cuadrosDetailHeaderFilterWrap}>
-      <summary style={styles.cuadrosDetailHeaderFilterSummary}>{summary}</summary>
-      <div style={styles.cuadrosDetailHeaderFilterPanel}>
-        <label style={styles.cuadrosDetailHeaderFilterOption}>
-          <input
-            type="checkbox"
-            checked={values.length === 0}
-            onChange={() => onChange([])}
-          />
-          <span>Todos</span>
-        </label>
-        {options.map((option) => {
-          const checked = values.includes(option);
-          return (
-            <label key={`header-filter-${option}`} style={styles.cuadrosDetailHeaderFilterOption}>
-              <input
-                type="checkbox"
-                checked={checked}
-                onChange={() =>
-                  onChange(
-                    checked
-                      ? values.filter((item) => item !== option)
-                      : [...values, option]
-                  )
-                }
-              />
-              <span>{option}</span>
-            </label>
-          );
-        })}
-      </div>
-    </details>
   );
 }
 
@@ -7395,57 +6998,63 @@ function SimpleGerencialAreaSummaryGrid({
   onClienteClick: (value: string) => void;
   expanded?: boolean;
 }) {
+  type SummaryRow = (typeof data)[number] & { __key: string };
+  const gridRows = useMemo<SummaryRow[]>(
+    () => data.map((item, index) => ({ ...item, __key: `${item.responsable}-${item.cliente}-${item.area}-${item.estadoMarcacionTexto}-${index}` })),
+    [data]
+  );
+  const clickableStyle = (active: boolean): React.CSSProperties =>
+    active ? { ...styles.summaryClickableCell, ...styles.summaryClickableCellActive } : styles.summaryClickableCell;
+  const columns: GridColumn<SummaryRow>[] = [
+    {
+      dataField: "responsable",
+      caption: "Responsable",
+      minWidth: 200,
+      cellRender: (_value, row) => (
+        <span
+          style={{ ...clickableStyle(selectedResponsables.includes(row.responsable)), display: "inline-block" }}
+          onClick={() => onResponsableClick(row.responsable)}
+          title={`Filtrar detalle por responsable: ${row.responsable}`}
+        >
+          {row.responsable}
+        </span>
+      ),
+    },
+    {
+      dataField: "cliente",
+      caption: "Cliente",
+      minWidth: 200,
+      cellRender: (_value, row) => (
+        <span
+          style={{ ...clickableStyle(selectedClientes.includes(row.cliente)), display: "inline-block" }}
+          onClick={() => onClienteClick(row.cliente)}
+          title={`Filtrar detalle por cliente: ${row.cliente}`}
+        >
+          {row.cliente}
+        </span>
+      ),
+    },
+    { dataField: "area", caption: "Area", width: 160 },
+    { dataField: "estadoMarcacionTexto", caption: "Estado marcacion", width: 170 },
+    { dataField: "cantidad", caption: "Cantidad", dataType: "number", width: 100, cellStyle: () => ({ fontWeight: 700 }) },
+  ];
+
   return (
     <div style={styles.cuadrosDetailWrap}>
       {data.length === 0 ? (
         <div style={styles.emptyMiniState}>Sin registros para mostrar.</div>
       ) : (
-        <div style={expanded ? { ...styles.cuadrosDetailScroller, ...styles.cuadrosDetailScrollerExpanded } : styles.cuadrosDetailScroller}>
-          <table style={styles.cuadrosDetailTable}>
-            <thead>
-              <tr>
-                <th style={styles.cuadrosDetailStaticTh}>
-                  <div style={styles.cuadrosDetailThContent}><span>Responsable</span></div>
-                </th>
-                <th style={styles.cuadrosDetailStaticTh}>
-                  <div style={styles.cuadrosDetailThContent}><span>Cliente</span></div>
-                </th>
-                <th style={styles.cuadrosDetailStaticTh}>
-                  <div style={styles.cuadrosDetailThContent}><span>Area</span></div>
-                </th>
-                <th style={styles.cuadrosDetailStaticTh}>
-                  <div style={styles.cuadrosDetailThContent}><span>Estado marcacion</span></div>
-                </th>
-                <th style={styles.cuadrosDetailStaticTh}>
-                  <div style={styles.cuadrosDetailThContent}><span>Cantidad</span></div>
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.map((item, index) => (
-                <tr key={`${item.responsable}-${item.cliente}-${item.estadoMarcacionTexto}-${index}`}>
-                  <td
-                    style={selectedResponsables.includes(item.responsable) ? { ...styles.cuadrosDetailTd, ...styles.summaryClickableCell, ...styles.summaryClickableCellActive } : { ...styles.cuadrosDetailTd, ...styles.summaryClickableCell }}
-                    onClick={() => onResponsableClick(item.responsable)}
-                    title={`Filtrar detalle por responsable: ${item.responsable}`}
-                  >
-                    {item.responsable}
-                  </td>
-                  <td
-                    style={selectedClientes.includes(item.cliente) ? { ...styles.cuadrosDetailTd, ...styles.summaryClickableCell, ...styles.summaryClickableCellActive } : { ...styles.cuadrosDetailTd, ...styles.summaryClickableCell }}
-                    onClick={() => onClienteClick(item.cliente)}
-                    title={`Filtrar detalle por cliente: ${item.cliente}`}
-                  >
-                    {item.cliente}
-                  </td>
-                  <td style={styles.cuadrosDetailTd}>{item.area}</td>
-                  <td style={styles.cuadrosDetailTd}>{item.estadoMarcacionTexto}</td>
-                  <td style={{ ...styles.cuadrosDetailTd, textAlign: "right", fontWeight: 700 }}>{item.cantidad}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <DataGridPro<SummaryRow>
+          dataSource={gridRows}
+          columns={columns}
+          keyExpr="__key"
+          height={expanded ? "fill" : 312}
+          showGroupPanel={false}
+          paging={{ pageSize: 50, pageSizes: [25, 50, 100, 200] }}
+          exportFileName="Asistencia_resumen_area"
+          stateStoringKey="rptasistencia-resumen-area"
+          rowPadding="4px 8px"
+        />
       )}
     </div>
   );

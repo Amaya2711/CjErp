@@ -184,6 +184,7 @@ export default function SeguridadPermisosAccionesPage() {
         { value: "tab.reaprobar", label: "Re-aprobar" },
         { value: "tab.hormiga", label: "Hormiga" },
         { value: "tab.observadas", label: "Observadas" },
+        { value: "tab.ficticio", label: "% Ficticio > 70" },
       ];
     }
 
@@ -265,6 +266,13 @@ export default function SeguridadPermisosAccionesPage() {
         { value: "button.primer_aprobador", label: "1er aprobador" },
         { value: "button.segundo_aprobador", label: "2do aprobador" },
         { value: "button.rechazar", label: "Rechazar" },
+      ];
+    }
+
+    if (form.tipoElemento === "tab" && form.rutaPagina.endsWith("/finanzas/tesoreria/gastosaprobar")) {
+      return [
+        { value: "tab.distribucion", label: "Distribucion por solicitante" },
+        { value: "tab.detalle", label: "Detalle" },
       ];
     }
 

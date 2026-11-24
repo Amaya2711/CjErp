@@ -1,6 +1,8 @@
-﻿import { useEffect, useMemo, useRef, useState } from "react";
-import type React from "react";
+﻿import type React from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Cell, Label, Pie, PieChart, Tooltip } from "recharts";
+import DataGridPro from "../../../components/datagrid/DataGridPro";
+import type { GridColumn } from "../../../components/datagrid/types";
 import AppCard from "../../../components/base/AppCard";
 import AppPage from "../../../components/base/AppPage";
 import AppSectionHeader from "../../../components/base/AppSectionHeader";
@@ -101,14 +103,19 @@ type ChartDatum = {
   amountsByCurrency: Record<string, number>;
 };
 
-type DrillLevel = "cliente" | "proyecto" | "site" | "tarea";
-type DetailSortColumn = "id" | "fecha" | "cliente" | "proyecto" | "site" | "tarea" | "moneda" | "monto" | "montoPen";
-type LevelSortColumn = "nivel" | "registros" | "montoPen" | string;
+type DrillLevel = "cliente" | "proyecto" | "site" | "tarea" | "responsable";
+type LevelGridRow = {
+  label: string;
+  count: number;
+  amountsByCurrency: Record<string, number>;
+  montoPen: number;
+};
 
 type DrillPath = {
   cliente: string | null;
   proyecto: string | null;
   site: string | null;
+  tarea: string | null;
 };
 
 const PIE_COLORS = [
@@ -130,9 +137,6 @@ const DEFAULT_EXCHANGE_RATES = {
 const DASHBOARD_REQUEST_TIMEOUT_MS = 120000;
 const DASHBOARD_CHUNK_DAYS_THRESHOLD = 45;
 const DASHBOARD_CHUNK_CONCURRENCY = 2;
-const DETAIL_ROW_HEIGHT = 44;
-const DETAIL_OVERSCAN = 8;
-const DETAIL_VISIBLE_ROWS = 14;
 
 function normalizeExchangeRateInput(value: string) {
   return value.replace(",", ".").replace(/[^\d.]/g, "");
@@ -174,13 +178,14 @@ function buildPathFromFiltro(value?: FiltroOperativoValue): DrillPath {
   const filtro = value?.filtro;
 
   if (!filtro) {
-    return { cliente: null, proyecto: null, site: null };
+    return { cliente: null, proyecto: null, site: null, tarea: null };
   }
 
   return {
     cliente: filtro.nombreCliente || null,
     proyecto: filtro.nombreProyecto || null,
     site: filtro.nombreSite || null,
+    tarea: null,
   };
 }
 
@@ -324,28 +329,6 @@ function formatModalText(value: string) {
 
 function getDisplayDepositDate(row: DrillRow) {
   return row.fechaDeposito && row.fechaDeposito !== "-" ? row.fechaDeposito : row.fechaIngreso;
-}
-
-function parseDisplayDateTime(value: string) {
-  const text = value.trim();
-  if (!text || text === "-") return Number.NaN;
-
-  const ddmmyyyy = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/;
-  const iso = /^(\d{4})-(\d{2})-(\d{2})$/;
-  const ddmm = text.match(ddmmyyyy);
-  if (ddmm) {
-    const [, day, month, year] = ddmm;
-    return new Date(Number(year), Number(month) - 1, Number(day)).getTime();
-  }
-
-  const isoMatch = text.match(iso);
-  if (isoMatch) {
-    const [, year, month, day] = isoMatch;
-    return new Date(Number(year), Number(month) - 1, Number(day)).getTime();
-  }
-
-  const parsed = new Date(text);
-  return Number.isFinite(parsed.getTime()) ? parsed.getTime() : Number.NaN;
 }
 
 function buildDrillRow(row: RawRow, preferredId?: string | number): DrillRow {
@@ -618,7 +601,8 @@ function getCurrentLevel(path: DrillPath): DrillLevel {
   if (!path.cliente) return "cliente";
   if (!path.proyecto) return "proyecto";
   if (!path.site) return "site";
-  return "tarea";
+  if (!path.tarea) return "tarea";
+  return "responsable";
 }
 
 function getLevelTitle(level: DrillLevel, path: DrillPath) {
@@ -631,6 +615,8 @@ function getLevelTitle(level: DrillLevel, path: DrillPath) {
       return `Sites de ${path.proyecto}`;
     case "tarea":
       return `Tareas de ${path.site}`;
+    case "responsable":
+      return `Responsables de ${path.tarea}`;
     default:
       return "Dashboard";
   }
@@ -645,7 +631,9 @@ function getLevelDescription(level: DrillLevel) {
     case "site":
       return "Haz clic en un site para revisar sus tareas.";
     case "tarea":
-      return "Detalle final por tarea dentro del site seleccionado.";
+      return "Haz clic en una tarea para ver los responsables.";
+    case "responsable":
+      return "Detalle final por responsable dentro de la tarea seleccionada.";
     default:
       return "";
   }
@@ -653,13 +641,16 @@ function getLevelDescription(level: DrillLevel) {
 
 function getNextPath(level: DrillLevel, path: DrillPath, label: string): DrillPath {
   if (level === "cliente") {
-    return { cliente: label, proyecto: null, site: null };
+    return { cliente: label, proyecto: null, site: null, tarea: null };
   }
   if (level === "proyecto") {
-    return { cliente: path.cliente, proyecto: label, site: null };
+    return { cliente: path.cliente, proyecto: label, site: null, tarea: null };
   }
   if (level === "site") {
-    return { cliente: path.cliente, proyecto: path.proyecto, site: label };
+    return { cliente: path.cliente, proyecto: path.proyecto, site: label, tarea: null };
+  }
+  if (level === "tarea") {
+    return { ...path, tarea: label };
   }
   return path;
 }
@@ -742,12 +733,8 @@ export default function Dashboard1Page() {
   const [appliedSearchText, setAppliedSearchText] = useState("");
   const [appliedUsdExchangeRate, setAppliedUsdExchangeRate] = useState<number>(DEFAULT_EXCHANGE_RATES.USD);
   const [appliedDopExchangeRate, setAppliedDopExchangeRate] = useState<number>(DEFAULT_EXCHANGE_RATES.DOP);
-  const [path, setPath] = useState<DrillPath>({ cliente: null, proyecto: null, site: null });
+  const [path, setPath] = useState<DrillPath>({ cliente: null, proyecto: null, site: null, tarea: null });
   const [totalRows, setTotalRows] = useState(0);
-  const [detailSortColumn, setDetailSortColumn] = useState<DetailSortColumn>("montoPen");
-  const [detailSortDirection, setDetailSortDirection] = useState<"asc" | "desc">("desc");
-  const [levelSortColumn, setLevelSortColumn] = useState<LevelSortColumn>("montoPen");
-  const [levelSortDirection, setLevelSortDirection] = useState<"asc" | "desc">("desc");
   const [selectedGastoRow, setSelectedGastoRow] = useState<DrillRow | null>(null);
   const [selectedGastoDetailLoading, setSelectedGastoDetailLoading] = useState(false);
   const [selectedGastoDetailError, setSelectedGastoDetailError] = useState("");
@@ -763,7 +750,6 @@ export default function Dashboard1Page() {
   const [taskEditMessage, setTaskEditMessage] = useState("");
   const [taskEditError, setTaskEditError] = useState("");
   const [selectedDetailLevelLabel, setSelectedDetailLevelLabel] = useState<string | null>(null);
-  const [detailScrollTop, setDetailScrollTop] = useState(0);
   const [loadProgress, setLoadProgress] = useState(0);
   const pieWrapRef = useRef<HTMLDivElement | null>(null);
   const [pieSize, setPieSize] = useState({ width: 280, height: 288 });
@@ -786,7 +772,7 @@ export default function Dashboard1Page() {
     const filtroSeleccionado = lookupValue?.filtro;
     const useCodigoFilters = !params?.ignoreCodigoFilters && hasValidFiltroSelection(lookupValue);
     const searchText = useCodigoFilters ? "" : buildLookupSearchText(lookupValue);
-    const nextPath = params?.path ?? { cliente: null, proyecto: null, site: null };
+    const nextPath = params?.path ?? { cliente: null, proyecto: null, site: null, tarea: null };
 
     loadProgressStartedAtRef.current = Date.now();
     setLoading(true);
@@ -833,8 +819,6 @@ export default function Dashboard1Page() {
       setAppliedFechaFin(fechaFin);
       setAppliedSearchText(searchText);
       setPath(nextPath);
-      setLevelSortColumn("montoPen");
-      setLevelSortDirection("desc");
       setRawRows(detailRows);
       setTotalRows(response.totalRows ?? detailRows.length);
       setLoadProgress(100);
@@ -977,6 +961,7 @@ export default function Dashboard1Page() {
       if (path.cliente && row.cliente !== path.cliente) return false;
       if (path.proyecto && row.proyecto !== path.proyecto) return false;
       if (path.site && row.site !== path.site) return false;
+      if (path.tarea && row.tarea !== path.tarea) return false;
       return true;
     });
   }, [path, rows]);
@@ -984,12 +969,12 @@ export default function Dashboard1Page() {
   const currentLevel = getCurrentLevel(path);
 
   const detailFilteredRows = useMemo(() => {
-    if (currentLevel !== "tarea" || !selectedDetailLevelLabel) {
+    if (currentLevel !== "responsable" || !selectedDetailLevelLabel) {
       return filteredRows;
     }
 
     const selectedLabel = normalizeText(selectedDetailLevelLabel);
-    return filteredRows.filter((row) => normalizeText(row.tarea) === selectedLabel);
+    return filteredRows.filter((row) => normalizeText(row.responsable) === selectedLabel);
   }, [currentLevel, filteredRows, selectedDetailLevelLabel]);
   const chartData = useMemo(
     () => buildBreakdown(filteredRows, currentLevel, appliedUsdExchangeRate, appliedDopExchangeRate),
@@ -1029,162 +1014,64 @@ export default function Dashboard1Page() {
   const totalPen = currencyTotalsMap.get("PEN") ?? 0;
   const totalUsd = currencyTotalsMap.get("USD") ?? 0;
   const totalDop = currencyTotalsMap.get("DOP") ?? 0;
-  const sortedChartData = useMemo(() => {
-    const items = [...chartData];
-    const direction = levelSortDirection === "asc" ? 1 : -1;
-
-    const compareValues = (left: string | number, right: string | number) => {
-      if (typeof left === "number" && typeof right === "number") {
-        return (left - right) * direction;
-      }
-
-      return String(left).localeCompare(String(right), "es-PE", { numeric: true, sensitivity: "base" }) * direction;
-    };
-
-    items.sort((left, right) => {
-      if (levelSortColumn === "nivel") return compareValues(left.label, right.label);
-      if (levelSortColumn === "registros") return compareValues(left.count, right.count);
-      if (levelSortColumn === "montoPen") {
-        const leftPen = Object.entries(left.amountsByCurrency).reduce(
-          (accumulator, [currency, amount]) => accumulator + convertToPen(amount, currency, appliedUsdExchangeRate, appliedDopExchangeRate),
+  const levelGridRows = useMemo<LevelGridRow[]>(
+    () =>
+      chartData.map((item) => ({
+        label: item.label,
+        count: item.count,
+        amountsByCurrency: item.amountsByCurrency,
+        montoPen: Object.entries(item.amountsByCurrency).reduce(
+          (accumulator, [currency, amount]) =>
+            accumulator + convertToPen(amount, currency, appliedUsdExchangeRate, appliedDopExchangeRate),
           0,
-        );
-        const rightPen = Object.entries(right.amountsByCurrency).reduce(
-          (accumulator, [currency, amount]) => accumulator + convertToPen(amount, currency, appliedUsdExchangeRate, appliedDopExchangeRate),
-          0,
-        );
-        return compareValues(leftPen, rightPen);
-      }
-
-      const leftAmount = left.amountsByCurrency[levelSortColumn] ?? 0;
-      const rightAmount = right.amountsByCurrency[levelSortColumn] ?? 0;
-      return compareValues(leftAmount, rightAmount);
-    });
-
-    return items;
-  }, [appliedDopExchangeRate, appliedUsdExchangeRate, chartData, levelSortColumn, levelSortDirection]);
-
-  const handleLevelSortClick = (column: LevelSortColumn) => {
-    if (levelSortColumn === column) {
-      setLevelSortDirection((prev) => (prev === "asc" ? "desc" : "asc"));
-      return;
-    }
-
-    setLevelSortColumn(column);
-    setLevelSortDirection("asc");
-  };
-  const sortedRows = useMemo(() => {
-    const rowsToSort = [...detailFilteredRows];
-    const direction = detailSortDirection === "asc" ? 1 : -1;
-
-    rowsToSort.sort((left, right) => {
-      const leftValue = (() => {
-        switch (detailSortColumn) {
-          case "id":
-            return Number.isFinite(Number(left.id)) ? Number(left.id) : left.id;
-          case "fecha":
-            return parseDisplayDateTime(getDisplayDepositDate(left));
-          case "cliente":
-            return left.cliente;
-          case "proyecto":
-            return left.proyecto;
-          case "site":
-            return left.site;
-          case "tarea":
-            return left.tarea;
-          case "moneda":
-            return left.moneda;
-          case "monto":
-            return left.monto;
-          case "montoPen":
-            return convertToPen(left.monto, left.moneda, appliedUsdExchangeRate, appliedDopExchangeRate);
-          default:
-            return left.id;
-        }
-      })();
-
-      const rightValue = (() => {
-        switch (detailSortColumn) {
-          case "id":
-            return Number.isFinite(Number(right.id)) ? Number(right.id) : right.id;
-          case "fecha":
-            return parseDisplayDateTime(getDisplayDepositDate(right));
-          case "cliente":
-            return right.cliente;
-          case "proyecto":
-            return right.proyecto;
-          case "site":
-            return right.site;
-          case "tarea":
-            return right.tarea;
-          case "moneda":
-            return right.moneda;
-          case "monto":
-            return right.monto;
-          case "montoPen":
-            return convertToPen(right.monto, right.moneda, appliedUsdExchangeRate, appliedDopExchangeRate);
-          default:
-            return right.id;
-        }
-      })();
-
-      if (typeof leftValue === "number" && typeof rightValue === "number") {
-        const leftNaN = Number.isNaN(leftValue);
-        const rightNaN = Number.isNaN(rightValue);
-        if (leftNaN && rightNaN) return 0;
-        if (leftNaN) return 1;
-        if (rightNaN) return -1;
-        return (leftValue - rightValue) * direction;
-      }
-
-      return String(leftValue).localeCompare(String(rightValue), "es-PE", { numeric: true, sensitivity: "base" }) * direction;
-    });
-
-    return rowsToSort;
-  }, [appliedDopExchangeRate, appliedUsdExchangeRate, detailFilteredRows, detailSortColumn, detailSortDirection]);
-  const detailWindow = useMemo(() => {
-    if (!recordsExpanded) {
-      return {
-        startIndex: 0,
-        endIndex: 0,
-        topSpacer: 0,
-        bottomSpacer: 0,
-        visibleRows: [] as DrillRow[],
-      };
-    }
-
-    const totalRowsCount = sortedRows.length;
-    const startIndex = Math.max(0, Math.floor(detailScrollTop / DETAIL_ROW_HEIGHT) - DETAIL_OVERSCAN);
-    const visibleCount = DETAIL_VISIBLE_ROWS + DETAIL_OVERSCAN * 2;
-    const endIndex = Math.min(totalRowsCount, startIndex + visibleCount);
-
-    return {
-      startIndex,
-      endIndex,
-      topSpacer: startIndex * DETAIL_ROW_HEIGHT,
-      bottomSpacer: Math.max(0, (totalRowsCount - endIndex) * DETAIL_ROW_HEIGHT),
-      visibleRows: sortedRows.slice(startIndex, endIndex),
-    };
-  }, [detailScrollTop, recordsExpanded, sortedRows]);
-
-  const handleDetailSortClick = (column: DetailSortColumn) => {
-    if (detailSortColumn === column) {
-      setDetailSortDirection((prev) => (prev === "asc" ? "desc" : "asc"));
-      return;
-    }
-
-    setDetailSortColumn(column);
-    setDetailSortDirection(column === "fecha" || column === "monto" || column === "montoPen" ? "desc" : "asc");
-  };
-
-  useEffect(() => {
-    setDetailScrollTop(0);
-  }, [detailSortColumn, detailSortDirection, detailFilteredRows.length, recordsExpanded]);
+        ),
+      })),
+    [appliedDopExchangeRate, appliedUsdExchangeRate, chartData],
+  );
+  const levelGridColumns = useMemo<GridColumn<LevelGridRow>[]>(
+    () => [
+      {
+        dataField: "label",
+        caption: "Nivel",
+        minWidth: 200,
+        cellRender: (_value, row) => (
+          <button
+            type="button"
+            style={isDetailLevelSelected(row.label) ? styles.linkButtonSelected : styles.linkButton}
+            onClick={() => handleChartClick({ label: row.label, rawLabel: row.label, value: row.montoPen, count: row.count, amountsByCurrency: row.amountsByCurrency })}
+          >
+            {row.label}
+          </button>
+        ),
+      },
+      { dataField: "count", caption: "Registros", dataType: "number", alignment: "right", width: 100 },
+      ...orderedVisibleCurrencies.map<GridColumn<LevelGridRow>>((currency) => ({
+        dataField: `cur_${currency}`,
+        caption: currency,
+        dataType: "number",
+        alignment: "right",
+        width: 140,
+        calculateCellValue: (row) => row.amountsByCurrency[currency] ?? 0,
+        cellRender: (_value, row) =>
+          row.amountsByCurrency[currency] != null ? formatCurrency(row.amountsByCurrency[currency], currency) : "-",
+      })),
+      {
+        dataField: "montoPen",
+        caption: "Monto en PEN",
+        dataType: "number",
+        alignment: "right",
+        width: 150,
+        sortOrder: "desc",
+        cellRender: (value) => formatCurrency(Number(value ?? 0), "PEN"),
+      },
+    ],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [orderedVisibleCurrencies, selectedDetailLevelLabel, currentLevel],
+  );
 
   useEffect(() => {
     setSelectedDetailLevelLabel(null);
-    setDetailScrollTop(0);
-  }, [path.cliente, path.proyecto, path.site]);
+  }, [path.cliente, path.proyecto, path.site, path.tarea]);
 
   useEffect(() => {
     if (preserveDetailSelectionOnNextRowsRef.current) {
@@ -1197,7 +1084,7 @@ export default function Dashboard1Page() {
 
   useEffect(() => {
     setIsRecordsDetailExpanded(false);
-  }, [path.cliente, path.proyecto, path.site, rawRows]);
+  }, [path.cliente, path.proyecto, path.site, path.tarea, rawRows]);
 
   const handleApplyFilters = async () => {
     const usdExchangeRate = parseExchangeRateInput(draftUsdExchangeRate);
@@ -1216,15 +1103,14 @@ export default function Dashboard1Page() {
       fechaInicio: draftFechaInicio,
       fechaFin: draftFechaFin,
       lookupValue: draftLookupValue,
-      path: useCodigoFilters ? buildPathFromFiltro(draftLookupValue) : { cliente: null, proyecto: null, site: null },
+      path: useCodigoFilters ? buildPathFromFiltro(draftLookupValue) : { cliente: null, proyecto: null, site: null, tarea: null },
     });
   };
 
   const handleChartClick = (datum: ChartDatum) => {
-    if (currentLevel === "tarea") {
+    if (currentLevel === "responsable") {
       setSelectedDetailLevelLabel(datum.rawLabel);
       setRecordsExpanded(true);
-      setDetailScrollTop(0);
       return;
     }
 
@@ -1233,7 +1119,7 @@ export default function Dashboard1Page() {
   };
 
   const isDetailLevelSelected = (label: string) =>
-    currentLevel === "tarea" &&
+    currentLevel === "responsable" &&
     selectedDetailLevelLabel !== null &&
     normalizeText(label) === normalizeText(selectedDetailLevelLabel);
 
@@ -1247,7 +1133,6 @@ export default function Dashboard1Page() {
 
   const handleOpenRecordsDetail = () => {
     setRecordsExpanded(true);
-    setDetailScrollTop(0);
     setIsRecordsDetailExpanded(true);
     setTaskEditMessage("");
     setTaskEditError("");
@@ -1358,30 +1243,36 @@ export default function Dashboard1Page() {
     }
   };
 
-  const handleBreadcrumbReset = (level: "all" | "cliente" | "proyecto") => {
+  const handleBreadcrumbReset = (level: "all" | "cliente" | "proyecto" | "site") => {
     if (level === "all") {
-      setPath({ cliente: null, proyecto: null, site: null });
+      setPath({ cliente: null, proyecto: null, site: null, tarea: null });
       return;
     }
 
     if (level === "cliente") {
-      setPath((prev) => ({ cliente: prev.cliente, proyecto: null, site: null }));
+      setPath((prev) => ({ cliente: prev.cliente, proyecto: null, site: null, tarea: null }));
       return;
     }
 
-    setPath((prev) => ({ cliente: prev.cliente, proyecto: prev.proyecto, site: null }));
+    if (level === "proyecto") {
+      setPath((prev) => ({ cliente: prev.cliente, proyecto: prev.proyecto, site: null, tarea: null }));
+      return;
+    }
+
+    setPath((prev) => ({ ...prev, tarea: null }));
   };
 
   const handleExportVisibleToExcel = async () => {
-    if (sortedRows.length === 0) return;
+    if (detailFilteredRows.length === 0) return;
     const XLSX = await import("xlsx");
     const workbook = XLSX.utils.book_new();
-    const exportRows = sortedRows.map((row) => ({
+    const exportRows = detailFilteredRows.map((row) => ({
       Id: row.id,
       Fecha: getDisplayDepositDate(row),
       Cliente: row.cliente,
       Proyecto: row.proyecto,
       Site: row.site,
+      Responsable: row.responsable,
       Tarea: row.tarea,
       Moneda: row.moneda,
       Monto: row.monto,
@@ -1442,179 +1333,133 @@ export default function Dashboard1Page() {
     ? convertToPen(selectedGastoRow.monto, selectedGastoRow.moneda, appliedUsdExchangeRate, appliedDopExchangeRate)
     : 0;
 
+  const renderLevelGrid = (height: number | "fill", storageSuffix: string) => (
+    <DataGridPro<LevelGridRow>
+      dataSource={levelGridRows}
+      columns={levelGridColumns}
+      keyExpr="label"
+      height={height}
+      loading={loading}
+      noDataText="No hay detalle para mostrar."
+      stateStoringKey={`dashboard1-${storageSuffix}`}
+      showSearchPanel={false}
+      rowAlternation={false}
+      rowPadding="3px 8px"
+      paging={false}
+    />
+  );
+
   const renderDetailRecordsTable = (options?: {
-    wrapStyle?: React.CSSProperties;
+    height?: number | "fill";
     allowTaskEdit?: boolean;
     forceTaskEditor?: boolean;
   }) => {
-    const wrapStyle = options?.wrapStyle ?? {};
+    const height = options?.height ?? 460;
     const allowTaskEdit = options?.allowTaskEdit ?? true;
     const forceTaskEditor = options?.forceTaskEditor ?? false;
-    const colSpan = 9;
+
+    const columns: GridColumn<DrillRow>[] = [
+      {
+        dataField: "id",
+        caption: "Id",
+        width: 100,
+        cellRender: (_value, row) => (
+          <button type="button" style={styles.rowDetailButton} onClick={() => handleOpenRowDetails(row)}>
+            {row.id}
+          </button>
+        ),
+      },
+      { dataField: "fecha", caption: "Fecha", width: 110, calculateCellValue: (row) => getDisplayDepositDate(row) },
+      { dataField: "cliente", caption: "Cliente", minWidth: 160 },
+      { dataField: "proyecto", caption: "Proyecto", minWidth: 160 },
+      { dataField: "site", caption: "Site", minWidth: 140 },
+      { dataField: "responsable", caption: "Responsable", minWidth: 180 },
+      {
+        dataField: "tarea",
+        caption: "Tarea",
+        minWidth: 200,
+        cellRender: (_value, row) => {
+          const isEditing = allowTaskEdit && (forceTaskEditor || editingTaskRowId === row.id);
+          const tareaLabel = getTareaLabelById(row.idTarea) || row.tarea;
+          const selectedValue = editingTaskId || (row.idTarea > 0 ? String(row.idTarea) : "");
+          const taskValue = row.idTarea > 0 ? String(row.idTarea) : "";
+
+          if (!isEditing) {
+            return (
+              <button
+                type="button"
+                style={styles.taskHoverActivator}
+                title="Haz clic para editar la tarea"
+                onClick={() => handleStartTaskEdit(row)}
+              >
+                {tareaLabel}
+              </button>
+            );
+          }
+
+          return (
+            <select
+              autoFocus={!forceTaskEditor}
+              value={forceTaskEditor ? taskValue : selectedValue}
+              onChange={(event) => {
+                if (forceTaskEditor) {
+                  void handleSaveTaskEdit(row, event.currentTarget.value);
+                  return;
+                }
+                setEditingTaskId(event.target.value);
+                event.currentTarget.blur();
+              }}
+              onBlur={forceTaskEditor ? undefined : (event) => void handleSaveTaskEdit(row, event.currentTarget.value)}
+              style={styles.recordsTaskSelect}
+              disabled={savingTaskRowId === row.id || tareasCatalogoLoading}
+            >
+              <option value="">Seleccione una tarea</option>
+              {tareasCatalogo.map((tarea) => (
+                <option key={tarea.correlativo} value={String(tarea.correlativo)}>
+                  {tarea.tarea}
+                </option>
+              ))}
+            </select>
+          );
+        },
+      },
+      { dataField: "moneda", caption: "Moneda", width: 90 },
+      {
+        dataField: "monto",
+        caption: "Monto",
+        dataType: "number",
+        alignment: "right",
+        width: 130,
+        cellRender: (_value, row) => formatCurrency(row.monto, row.moneda),
+      },
+      {
+        dataField: "montoPen",
+        caption: "Monto en PEN",
+        dataType: "number",
+        alignment: "right",
+        width: 140,
+        calculateCellValue: (row) => convertToPen(row.monto, row.moneda, appliedUsdExchangeRate, appliedDopExchangeRate),
+        cellRender: (value) => formatCurrency(Number(value ?? 0), "PEN"),
+      },
+    ];
 
     return (
       <AppCard style={styles.compactCard}>
-        <div
-          style={{ ...styles.detailRecordsTableWrap, ...wrapStyle }}
-          onScroll={(event) => setDetailScrollTop(event.currentTarget.scrollTop)}
-        >
-          <table style={styles.detailRecordsTable}>
-            <thead>
-              <tr>
-                <th style={styles.sortableTh}>
-                  <button type="button" style={styles.sortHeaderButton} onClick={() => handleDetailSortClick("id")}>
-                    <span>Id</span>
-                    {detailSortColumn === "id" ? <span style={styles.sortIndicator}>{detailSortDirection === "asc" ? "â–²" : "â–¼"}</span> : null}
-                  </button>
-                </th>
-                <th style={styles.sortableTh}>
-                  <button type="button" style={styles.sortHeaderButton} onClick={() => handleDetailSortClick("fecha")}>
-                    <span>Fecha</span>
-                    {detailSortColumn === "fecha" ? <span style={styles.sortIndicator}>{detailSortDirection === "asc" ? "â–²" : "â–¼"}</span> : null}
-                  </button>
-                </th>
-                <th style={styles.sortableTh}>
-                  <button type="button" style={styles.sortHeaderButton} onClick={() => handleDetailSortClick("cliente")}>
-                    <span>Cliente</span>
-                    {detailSortColumn === "cliente" ? <span style={styles.sortIndicator}>{detailSortDirection === "asc" ? "â–²" : "â–¼"}</span> : null}
-                  </button>
-                </th>
-                <th style={styles.sortableTh}>
-                  <button type="button" style={styles.sortHeaderButton} onClick={() => handleDetailSortClick("proyecto")}>
-                    <span>Proyecto</span>
-                    {detailSortColumn === "proyecto" ? <span style={styles.sortIndicator}>{detailSortDirection === "asc" ? "â–²" : "â–¼"}</span> : null}
-                  </button>
-                </th>
-                <th style={styles.sortableTh}>
-                  <button type="button" style={styles.sortHeaderButton} onClick={() => handleDetailSortClick("site")}>
-                    <span>Site</span>
-                    {detailSortColumn === "site" ? <span style={styles.sortIndicator}>{detailSortDirection === "asc" ? "â–²" : "â–¼"}</span> : null}
-                  </button>
-                </th>
-                <th style={styles.sortableTh}>
-                  <button type="button" style={styles.sortHeaderButton} onClick={() => handleDetailSortClick("tarea")}>
-                    <span>Tarea</span>
-                    {detailSortColumn === "tarea" ? <span style={styles.sortIndicator}>{detailSortDirection === "asc" ? "â–²" : "â–¼"}</span> : null}
-                  </button>
-                </th>
-                <th style={styles.sortableTh}>
-                  <button type="button" style={styles.sortHeaderButton} onClick={() => handleDetailSortClick("moneda")}>
-                    <span>Moneda</span>
-                    {detailSortColumn === "moneda" ? <span style={styles.sortIndicator}>{detailSortDirection === "asc" ? "â–²" : "â–¼"}</span> : null}
-                  </button>
-                </th>
-                <th style={styles.sortableTh}>
-                  <button type="button" style={styles.sortHeaderButton} onClick={() => handleDetailSortClick("monto")}>
-                    <span>Monto</span>
-                    {detailSortColumn === "monto" ? <span style={styles.sortIndicator}>{detailSortDirection === "asc" ? "â–²" : "â–¼"}</span> : null}
-                  </button>
-                </th>
-                <th style={styles.sortableTh}>
-                  <button type="button" style={styles.sortHeaderButton} onClick={() => handleDetailSortClick("montoPen")}>
-                    <span>Monto en PEN</span>
-                    {detailSortColumn === "montoPen" ? <span style={styles.sortIndicator}>{detailSortDirection === "asc" ? "â–²" : "â–¼"}</span> : null}
-                  </button>
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {loading ? (
-                <tr>
-                  <td colSpan={colSpan} style={styles.emptyCell}>
-                    Cargando información del store...
-                  </td>
-                </tr>
-              ) : filteredRows.length === 0 ? (
-                <tr>
-                  <td colSpan={colSpan} style={styles.emptyCell}>
-                    No hay registros para mostrar.
-                  </td>
-                </tr>
-              ) : (
-                <>
-                  {detailWindow.topSpacer > 0 ? (
-                    <tr aria-hidden="true">
-                      <td colSpan={colSpan} style={{ padding: 0, border: 0, height: detailWindow.topSpacer }} />
-                    </tr>
-                  ) : null}
-                  {detailWindow.visibleRows.map((row) => {
-                    const isEditing = allowTaskEdit && (forceTaskEditor || editingTaskRowId === row.id);
-                    const tareaLabel = getTareaLabelById(row.idTarea) || row.tarea;
-                    const selectedValue = editingTaskId || (row.idTarea > 0 ? String(row.idTarea) : "");
-                    const taskValue = row.idTarea > 0 ? String(row.idTarea) : "";
-
-                    return (
-                      <tr key={row.id}>
-                        <td style={styles.tdStrong}>
-                          <button type="button" style={styles.rowDetailButton} onClick={() => handleOpenRowDetails(row)}>
-                            {row.id}
-                          </button>
-                        </td>
-                        <td style={styles.td}>{getDisplayDepositDate(row)}</td>
-                        <td style={styles.td}>{row.cliente}</td>
-                        <td style={styles.td}>{row.proyecto}</td>
-                        <td style={styles.td}>{row.site}</td>
-                        <td style={styles.td}>
-                          {isEditing ? (
-                            <select
-                              autoFocus={!forceTaskEditor}
-                              value={forceTaskEditor ? taskValue : selectedValue}
-                              onChange={(event) => {
-                                if (forceTaskEditor) {
-                                  void handleSaveTaskEdit(row, event.currentTarget.value);
-                                  return;
-                                }
-
-                                setEditingTaskId(event.target.value);
-                                event.currentTarget.blur();
-                              }}
-                              onBlur={
-                                forceTaskEditor
-                                  ? undefined
-                                  : (event) => void handleSaveTaskEdit(row, event.currentTarget.value)
-                              }
-                              style={styles.recordsTaskSelect}
-                              disabled={savingTaskRowId === row.id || tareasCatalogoLoading}
-                            >
-                              <option value="">Seleccione una tarea</option>
-                              {tareasCatalogo.map((tarea) => (
-                                <option key={tarea.correlativo} value={String(tarea.correlativo)}>
-                                  {tarea.tarea}
-                                </option>
-                              ))}
-                            </select>
-                          ) : (
-                            <button
-                              type="button"
-                              style={styles.taskHoverActivator}
-                              title="Pasa el mouse o enfoca para editar la tarea"
-                              onPointerEnter={() => handleStartTaskEdit(row)}
-                              onMouseEnter={() => handleStartTaskEdit(row)}
-                              onFocus={() => handleStartTaskEdit(row)}
-                              onClick={() => handleStartTaskEdit(row)}
-                              >
-                                {tareaLabel}
-                              </button>
-                          )}
-                        </td>
-                        <td style={styles.tdStrong}>{row.moneda}</td>
-                        <td style={styles.tdStrong}>{formatCurrency(row.monto, row.moneda)}</td>
-                        <td style={styles.tdStrong}>
-                          {formatCurrency(convertToPen(row.monto, row.moneda, appliedUsdExchangeRate, appliedDopExchangeRate), "PEN")}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                  {detailWindow.bottomSpacer > 0 ? (
-                    <tr aria-hidden="true">
-                      <td colSpan={colSpan} style={{ padding: 0, border: 0, height: detailWindow.bottomSpacer }} />
-                    </tr>
-                  ) : null}
-                </>
-              )}
-            </tbody>
-          </table>
-        </div>
+        <DataGridPro<DrillRow>
+          dataSource={detailFilteredRows}
+          columns={columns}
+          keyExpr="id"
+          height={height}
+          loading={loading}
+          noDataText="No hay registros para mostrar."
+          stateStoringKey="dashboard1-detalle-registros"
+          showSearchPanel
+          allowExport
+          exportFileName={`registros_detalle_${appliedFechaInicio}_${appliedFechaFin}`}
+          rowAlternation={false}
+          rowPadding="3px 8px"
+          paging={{ pageSize: 100, pageSizes: [50, 100, 250, 500] }}
+        />
       </AppCard>
     );
   };
@@ -1735,7 +1580,12 @@ export default function Dashboard1Page() {
                   {path.proyecto}
                 </button>
               ) : null}
-              {path.site ? <span style={styles.breadcrumbFinal}>{path.site}</span> : null}
+              {path.site ? (
+                <button type="button" style={path.tarea ? styles.breadcrumbButton : styles.breadcrumbButtonActive} onClick={() => handleBreadcrumbReset("site")}>
+                  {path.site}
+                </button>
+              ) : null}
+              {path.tarea ? <span style={styles.breadcrumbFinal}>{path.tarea}</span> : null}
             </div>
             <button type="button" style={styles.expandSectionButton} onClick={handleOpenLevelDetail}>
               Ampliar
@@ -1773,7 +1623,7 @@ export default function Dashboard1Page() {
                                 fill={PIE_COLORS[index % PIE_COLORS.length]}
                               stroke="#ffffff"
                               strokeWidth={2}
-                              cursor={currentLevel === "tarea" ? "default" : "pointer"}
+                              cursor={currentLevel === "responsable" ? "default" : "pointer"}
                               />
                             ))}
                             <Label
@@ -1847,78 +1697,8 @@ export default function Dashboard1Page() {
                 <div style={styles.detailSection}>
                   <div style={styles.detailPanel}>
                     <div style={styles.tableWrap}>
-                      <table style={styles.table}>
-                      <thead>
-                        <tr>
-                          <th style={styles.sortableTh}>
-                            <button type="button" style={styles.sortHeaderButton} onClick={() => handleLevelSortClick("nivel")}>
-                              <span>Nivel</span>
-                              {levelSortColumn === "nivel" ? <span style={styles.sortIndicator}>{levelSortDirection === "asc" ? "â–²" : "â–¼"}</span> : null}
-                            </button>
-                          </th>
-                          <th style={styles.sortableTh}>
-                            <button type="button" style={styles.sortHeaderButton} onClick={() => handleLevelSortClick("registros")}>
-                              <span>Registros</span>
-                              {levelSortColumn === "registros" ? <span style={styles.sortIndicator}>{levelSortDirection === "asc" ? "â–²" : "â–¼"}</span> : null}
-                            </button>
-                          </th>
-                          {orderedVisibleCurrencies.map((currency) => (
-                            <th key={currency} style={styles.sortableTh}>
-                              <button type="button" style={styles.sortHeaderButton} onClick={() => handleLevelSortClick(currency)}>
-                                <span>{currency}</span>
-                                {levelSortColumn === currency ? <span style={styles.sortIndicator}>{levelSortDirection === "asc" ? "â–²" : "â–¼"}</span> : null}
-                              </button>
-                            </th>
-                          ))}
-                          <th style={styles.sortableTh}>
-                            <button type="button" style={{ ...styles.sortHeaderButton, ...styles.accentSortHeaderButton }} onClick={() => handleLevelSortClick("montoPen")}>
-                              <span>Monto en PEN</span>
-                              {levelSortColumn === "montoPen" ? <span style={styles.sortIndicator}>{levelSortDirection === "asc" ? "â–²" : "â–¼"}</span> : null}
-                            </button>
-                          </th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {chartData.length === 0 ? (
-                          <tr>
-                            <td colSpan={3 + orderedVisibleCurrencies.length} style={styles.emptyCell}>No hay detalle para mostrar.</td>
-                          </tr>
-                        ) : (
-                          sortedChartData.map((item) => (
-                            <tr key={item.label}>
-                              <td style={styles.td}>
-                                <button
-                                  type="button"
-                                  style={isDetailLevelSelected(item.label) ? styles.linkButtonSelected : styles.linkButton}
-                                  onClick={() => handleChartClick(item)}
-                                >
-                                  {item.label}
-                                </button>
-                              </td>
-                              <td style={styles.td}>{item.count}</td>
-                              {orderedVisibleCurrencies.map((currency) => (
-                                <td key={currency} style={styles.tdStrong}>
-                                  {item.amountsByCurrency[currency] != null
-                                    ? formatCurrency(item.amountsByCurrency[currency], currency)
-                                    : "-"}
-                                </td>
-                              ))}
-                              <td style={{ ...styles.tdStrong, ...styles.accentTableCell }}>
-                                {formatCurrency(
-                                  Object.entries(item.amountsByCurrency).reduce(
-                                    (accumulator, [currency, amount]) =>
-                                      accumulator + convertToPen(amount, currency, appliedUsdExchangeRate, appliedDopExchangeRate),
-                                    0,
-                                  ),
-                                  "PEN",
-                                )}
-                              </td>
-                            </tr>
-                          ))
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
+                      {renderLevelGrid("fill", "nivel")}
+                    </div>
                 </div>
               </div>
             </div>
@@ -1961,7 +1741,6 @@ export default function Dashboard1Page() {
                   onClick={(event) => {
                     event.stopPropagation();
                     setSelectedDetailLevelLabel(null);
-                    setDetailScrollTop(0);
                   }}
                   onKeyDown={(event) => event.stopPropagation()}
                 >
@@ -2055,7 +1834,7 @@ export default function Dashboard1Page() {
               </div>
 
               {renderDetailRecordsTable({
-                wrapStyle: styles.recordsDetailTableWrapExpanded,
+                height: 520,
                 allowTaskEdit: true,
                 forceTaskEditor: true,
               })}
@@ -2229,82 +2008,10 @@ export default function Dashboard1Page() {
               </div>
 
               <div style={styles.levelModalTableWrap}>
-                <table style={styles.table}>
-                  <thead>
-                    <tr>
-                      <th style={styles.sortableTh}>
-                        <button type="button" style={styles.sortHeaderButton} onClick={() => handleLevelSortClick("nivel")}>
-                          <span>Nivel</span>
-                          {levelSortColumn === "nivel" ? <span style={styles.sortIndicator}>{levelSortDirection === "asc" ? "â–²" : "â–¼"}</span> : null}
-                        </button>
-                      </th>
-                      <th style={styles.sortableTh}>
-                        <button type="button" style={styles.sortHeaderButton} onClick={() => handleLevelSortClick("registros")}>
-                          <span>Registros</span>
-                          {levelSortColumn === "registros" ? <span style={styles.sortIndicator}>{levelSortDirection === "asc" ? "â–²" : "â–¼"}</span> : null}
-                        </button>
-                      </th>
-                      {orderedVisibleCurrencies.map((currency) => (
-                        <th key={currency} style={styles.sortableTh}>
-                          <button type="button" style={styles.sortHeaderButton} onClick={() => handleLevelSortClick(currency)}>
-                            <span>{currency}</span>
-                            {levelSortColumn === currency ? <span style={styles.sortIndicator}>{levelSortDirection === "asc" ? "â–²" : "â–¼"}</span> : null}
-                          </button>
-                        </th>
-                      ))}
-                      <th style={styles.sortableTh}>
-                        <button type="button" style={{ ...styles.sortHeaderButton, ...styles.accentSortHeaderButton }} onClick={() => handleLevelSortClick("montoPen")}>
-                          <span>Monto en PEN</span>
-                          {levelSortColumn === "montoPen" ? <span style={styles.sortIndicator}>{levelSortDirection === "asc" ? "â–²" : "â–¼"}</span> : null}
-                        </button>
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {chartData.length === 0 ? (
-                      <tr>
-                        <td colSpan={3 + orderedVisibleCurrencies.length} style={styles.emptyCell}>
-                          No hay detalle para mostrar.
-                        </td>
-                      </tr>
-                    ) : (
-                      sortedChartData.map((item) => (
-                        <tr key={`expanded-${item.label}`}>
-                          <td style={styles.td}>
-                            <button
-                              type="button"
-                              style={isDetailLevelSelected(item.label) ? styles.linkButtonSelected : styles.linkButton}
-                              onClick={() => handleChartClick(item)}
-                            >
-                              {item.label}
-                            </button>
-                          </td>
-                          <td style={styles.td}>{item.count}</td>
-                          {orderedVisibleCurrencies.map((currency) => (
-                            <td key={currency} style={styles.tdStrong}>
-                              {item.amountsByCurrency[currency] != null
-                                ? formatCurrency(item.amountsByCurrency[currency], currency)
-                                : "-"}
-                            </td>
-                          ))}
-                          <td style={{ ...styles.tdStrong, ...styles.accentTableCell }}>
-                            {formatCurrency(
-                              Object.entries(item.amountsByCurrency).reduce(
-                                (accumulator, [currency, amount]) =>
-                                  accumulator + convertToPen(amount, currency, appliedUsdExchangeRate, appliedDopExchangeRate),
-                                0,
-                              ),
-                              "PEN",
-                            )}
-                          </td>
-                        </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
+                {renderLevelGrid(380, "nivel-ampliado")}
               </div>
               <div style={styles.recordsFooterNote}>
-                Registros seleccionados: <strong>{sortedRows.length}</strong>
+                Registros seleccionados: <strong>{detailFilteredRows.length}</strong>
               </div>
             </div>
           </div>
