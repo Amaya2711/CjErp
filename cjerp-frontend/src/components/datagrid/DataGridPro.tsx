@@ -320,8 +320,22 @@ export default function DataGridPro<T extends object>({
 
   const orderedFields = useMemo(() => {
     const known = order.filter((f) => colMap.has(f));
-    const missing = columns.map((c) => c.dataField).filter((f) => !known.includes(f));
-    const base = [...known, ...missing];
+    // Columnas nuevas (no están en el orden guardado): se insertan tras su columna anterior en la
+    // definición, no al final, para que no queden ocultas fuera de pantalla.
+    const base = [...known];
+    const definition = columns.map((c) => c.dataField);
+    definition.forEach((field, index) => {
+      if (base.includes(field)) return;
+      let insertAt = base.length;
+      for (let i = index - 1; i >= 0; i -= 1) {
+        const previousPos = base.indexOf(definition[i]);
+        if (previousPos >= 0) {
+          insertAt = previousPos + 1;
+          break;
+        }
+      }
+      base.splice(insertAt, 0, field);
+    });
     // Columnas con placeAfter: siempre pegadas a su columna de referencia.
     // Entre seguidoras de una misma referencia se respeta el orden de definición de `columns`.
     const defIndex = new Map(columns.map((c, i) => [c.dataField, i]));

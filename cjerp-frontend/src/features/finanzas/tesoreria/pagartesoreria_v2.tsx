@@ -1396,7 +1396,7 @@ export default function PagarTesoreriaV2Page() {
     { dataField: "cuentaInter", caption: "CuentaInter", width: 190, calculateCellValue: (r) => r.cuentaInter || "—", cellRender: (_v, r) => copyButton(r.cuentaInter, "CuentaInter") },
     { dataField: "nombreCta", caption: "NombreCta", width: 180, calculateCellValue: (r) => r.nombreCta || "—" },
     { dataField: "idBancoCta", caption: "IdBancoCta", width: 200, calculateCellValue: bancoCuentaNombre },
-    ...(estado === 9 || estado === 1
+    ...(estado === 9 || estado === 1 || estado === 4
       ? [{
           dataField: "anticipo",
           caption: "Anticipo",
