@@ -331,3 +331,102 @@ export interface IngresosPendientesResponse {
   ingresos: IngresoPendiente[];
   total: number;
 }
+
+export interface CxcCargaSireFila {
+  linea: number;
+  estado: "NUEVO" | "YA_EXISTE" | "REPETIDO_EN_ARCHIVO" | "INVALIDO";
+  motivo?: string | null;
+  carSunat: string;
+  fechaEmision?: string | null;
+  tipoCp?: string | null;
+  serieCp?: string | null;
+  nroCp?: string | null;
+  nroDocIdentidad?: string | null;
+  razonSocialCliente?: string | null;
+  moneda?: string | null;
+  totalCp: number;
+}
+
+export interface CxcCargaSireResponse {
+  soloAnalizar: boolean;
+  grabado: boolean;
+  totalFilas: number;
+  nuevos: number;
+  yaExisten: number;
+  repetidosEnArchivo: number;
+  invalidos: number;
+  insertados: number;
+  mensaje: string;
+  filas: CxcCargaSireFila[];
+}
+
+export interface CxcDocumento {
+  idDocumento: number;
+  carSunat: string;
+  periodo?: string | null;
+  fechaEmision?: string | null;
+  fechaVencimiento?: string | null;
+  tipoCp?: string | null;
+  serieCp?: string | null;
+  nroCp?: string | null;
+  nroDocIdentidad?: string | null;
+  razonSocialCliente?: string | null;
+  totalCp: number;
+  moneda?: string | null;
+  tipoCambio?: number | null;
+  archivoOrigen?: string | null;
+  fechaCarga: string;
+  usuarioCarga?: string | null;
+}
+
+export interface CxcCargaDetraccionFila {
+  linea: number;
+  estado: "NUEVO" | "YA_EXISTE" | "REPETIDO_EN_ARCHIVO" | "INVALIDO" | "OMITIDO_COMPRA";
+  motivo?: string | null;
+  aviso?: string | null;
+  numeroConstancia: string;
+  fechaPago?: string | null;
+  montoDeposito: number;
+  rucCliente?: string | null;
+  cliente?: string | null;
+  tipoComprobante?: string | null;
+  serieComprobante?: string | null;
+  numeroComprobante?: string | null;
+  numeroCuenta?: string | null;
+  facturaEnSire: boolean;
+}
+
+export interface CxcCargaDetraccionesResponse {
+  soloAnalizar: boolean;
+  grabado: boolean;
+  totalFilas: number;
+  nuevos: number;
+  yaExisten: number;
+  repetidosEnArchivo: number;
+  invalidos: number;
+  omitidosCompra: number;
+  sinFacturaSire: number;
+  posiblesDuplicados: number;
+  insertados: number;
+  mensaje: string;
+  filas: CxcCargaDetraccionFila[];
+}
+
+export interface CxcDetraccion {
+  idDetraccion: number;
+  numeroConstancia: string;
+  fechaPago?: string | null;
+  montoDeposito: number;
+  nroDocAdquiriente?: string | null;
+  nombreAdquiriente?: string | null;
+  tipoComprobante?: string | null;
+  serieComprobante?: string | null;
+  numeroComprobante?: string | null;
+  periodoTributario?: string | null;
+  numeroCuenta?: string | null;
+  idDocumento?: number | null;
+  observacion?: string | null;
+  archivoOrigen?: string | null;
+  fechaCarga: string;
+  usuarioCarga?: string | null;
+}

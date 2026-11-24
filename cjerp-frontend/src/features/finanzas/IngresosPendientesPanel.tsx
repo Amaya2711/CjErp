@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import DataGridPro from "../../components/datagrid/DataGridPro";
+import { useFillHeight } from "./useFillHeight";
 import type { GridColumn } from "../../components/datagrid/types";
 import { obtenerIngresosPendientes } from "../../api/conciliacionService";
 import type { IngresoPendiente } from "../../models/conciliacionBcp";
@@ -36,6 +37,7 @@ function formatMonto(value: number, moneda: string): string {
  * Ingreso pendiente = movimiento conciliado, Monto > 0, Area Flujo "INGRESOS OP" y saldo por aplicar > 0.
  */
 export default function IngresosPendientesPanel() {
+  const { ref: gRef, height: gH } = useFillHeight();
   const [fechaInicio, setFechaInicio] = useState("");
   const [fechaFin, setFechaFin] = useState("");
   const [codigoBanco, setCodigoBanco] = useState("");
@@ -126,7 +128,7 @@ export default function IngresosPendientesPanel() {
         {error ? <div style={{ color: "#b91c1c", fontSize: 13 }}>{error}</div> : null}
       </div>
 
-      <div style={{ background: "#fff", borderRadius: 12, padding: 8, height: 560, display: "flex", flexDirection: "column" }}>
+      <div ref={gRef} style={{ background: "#fff", borderRadius: 12, padding: 8, height: gH, display: "flex", flexDirection: "column" }}>
         <DataGridPro<IngresoPendiente>
           dataSource={rows}
           keyExpr="idMovimientoBanco"

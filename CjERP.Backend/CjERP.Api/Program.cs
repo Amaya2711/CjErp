@@ -263,6 +263,8 @@ builder.Services.AddScoped<PagoTesoreriaService>();
 builder.Services.AddScoped<IMigracionImportService, MigracionImportService>();
 builder.Services.AddScoped<IMigracionImportProcesarNewService, MigracionImportProcesarNewService>();
 builder.Services.AddScoped<IVentasSunatService, VentasSunatService>();
+builder.Services.AddScoped<ICxcCargaService, CxcCargaService>();
+builder.Services.AddScoped<ICxcDetraccionesService, CxcDetraccionesService>();
 builder.Services.AddHttpClient<IConciliacionBcpService, ConciliacionBcpService>(client =>
 {
     client.BaseAddress = new Uri("https://api.openai.com");

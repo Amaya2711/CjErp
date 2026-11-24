@@ -311,6 +311,20 @@ ORDER BY rc.IdAreaFlujo, rc.IdReferencia, rc.IdCuentaContable, rc.Orden, rc.IdRe
                 var key = BuildUniqueKey(fila, uniqueKeyColumns);
                 var existeEnConciliacion = existingKeysConciliacion.Contains(key);
 
+                // BCP (1) y Scotiabank (2) comparten cuentas y movimientos: si el mismo movimiento ya esta
+                // grabado bajo el otro banco, es un duplicado aunque IdBanco (parte de la llave) cambie.
+                if (!existeEnConciliacion
+                    && TryGetValueIgnoreCase(fila, "IdBanco", out var idBancoValue)
+                    && int.TryParse(NormalizeKeyPart(idBancoValue), out var idBancoFila)
+                    && idBancoFila is 1 or 2)
+                {
+                    var filaOtroBanco = new Dictionary<string, object?>(fila, StringComparer.OrdinalIgnoreCase)
+                    {
+                        ["IdBanco"] = idBancoFila == 1 ? 2 : 1
+                    };
+                    existeEnConciliacion = existingKeysConciliacion.Contains(BuildUniqueKey(filaOtroBanco, uniqueKeyColumns));
+                }
+
                 if (!existeEnConciliacion)
                 {
                     filasParaInsertarConciliacion.Add(fila);

@@ -32,7 +32,7 @@ import type {
 import type { PlanillaConsultaParametro } from "../../models/planillaConsulta";
 import { getHttpErrorMessage } from "../../utils/httpError";
 import { ArrowUpDown, ChevronDown, ChevronRight, Eye, FileDown, Maximize2, Minimize2, Search } from "lucide-react";
-import IngresosPendientesPanel from "./IngresosPendientesPanel";
+import IngresoPortalPanel from "./IngresoPortalPanel";
 
 const MAX_FILE_SIZE_BYTES = 15_000_000;
 type ConciliacionSortKey =
@@ -1580,6 +1580,46 @@ async function fileToBase64(file: File): Promise<string> {
   return btoa(binary);
 }
 
+function compactKey(value: unknown): string {
+  return normalizeText(String(value ?? "")).toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+/**
+ * Intenta reconocer el banco al que corresponde el Excel segun su estructura (solo para avisar al usuario).
+ * Devuelve null si no logra identificarlo con seguridad.
+ */
+function detectBancoFromRows(rows: string[][]): string | null {
+  const head = rows.slice(0, 15);
+  const headCells = head.map((row) => row.map(compactKey).filter(Boolean));
+  const allCells = new Set(headCells.flat());
+  const headText = headCells.map((cells) => cells.join(" ")).join(" ");
+
+  // BBVA: "Cuenta Actual: ..." y cabecera F. Operacion / F. Valor / Concepto.
+  if (headText.includes("cuentaactual") || (allCells.has("foperacion") && allCells.has("fvalor") && allCells.has("concepto"))) {
+    return "BBVA";
+  }
+
+  // Interbank: Fecha de operacion / Fecha de proceso / Cargo / Abono.
+  if (allCells.has("fechadeoperacion") && allCells.has("fechadeproceso") && allCells.has("cargo") && allCells.has("abono")) {
+    return "INTERBANK";
+  }
+
+  // Scotiabank: encabezado con "CUENTA CORRIENTE ..." y "Saldo contable" en las primeras filas.
+  if (headCells.slice(0, 8).some((cells) => cells.some((cell) => cell.startsWith("cuentacorriente")))) {
+    return "SCOTIABANK";
+  }
+
+  // BCP: cabecera con "Operacion - Numero" y "Sucursal - agencia".
+  if (
+    (allCells.has("operacionnumero") || allCells.has("nroperacion")) &&
+    (allCells.has("sucursalagencia") || allCells.has("descripcionoperacion"))
+  ) {
+    return "BCP";
+  }
+
+  return null;
+}
+
 async function parseExcelFile(file: File, codigoBanco?: string | null): Promise<ParsedConciliacionExcelFile> {
   const XLSX = await import("xlsx");
   const buffer = await file.arrayBuffer();
@@ -1927,6 +1967,18 @@ export default function ConciliacionBcpPage() {
 
   const hasAnalysis = Boolean(analysis?.archivos?.length);
   const canAnalyze = files.length > 0 && !loadingParse && !loadingAnalysis && !loadingInsert;
+  const bancoMismatchWarnings = useMemo(() => {
+    const seleccionado = normalizeText(codigoBanco);
+    return files
+      .filter((file) => !file.clientError)
+      .map((file) => ({ nombre: file.nombreArchivo, detectado: detectBancoFromRows(file.rows) }))
+      .filter((item) => item.detectado && normalizeText(item.detectado) !== seleccionado)
+      .map(
+        (item) =>
+          `El archivo "${item.nombre}" parece ser de ${item.detectado}, pero el banco seleccionado es ${seleccionado}. ` +
+          `Cambia el banco a ${item.detectado} antes de analizar o grabar; si no, los movimientos quedarian asignados al banco equivocado.`
+      );
+  }, [files, codigoBanco]);
   const canAttemptInsert =
     hasAnalysis &&
     getAnalysisRows(analysis?.archivos ?? []).length > 0 &&
@@ -4021,7 +4073,7 @@ export default function ConciliacionBcpPage() {
       </div>
 
       {vistaPrincipal === "INGRESO" ? (
-        <IngresosPendientesPanel />
+        <IngresoPortalPanel />
       ) : null}
 
       {/* BANCOS: toda la logica actual. Se oculta (sin desmontar) para conservar archivos, analisis y filtros al cambiar de pestaña. */}
@@ -4143,6 +4195,11 @@ export default function ConciliacionBcpPage() {
         {error ? (
           <div style={isFriendlyDuplicateWarning ? styles.warningBanner : styles.errorBanner}>{error}</div>
         ) : null}
+        {bancoMismatchWarnings.map((warning) => (
+          <div key={warning} style={styles.warningBanner}>
+            {warning}
+          </div>
+        ))}
         {message ? <div style={styles.successBanner}>{message}</div> : null}
 
         {files.length === 0 ? (

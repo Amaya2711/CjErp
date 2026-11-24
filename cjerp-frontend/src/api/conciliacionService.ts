@@ -13,6 +13,10 @@ import type {
   ConciliacionBcpInsertRequest,
   ConciliacionBcpInsertResponse,
   IngresosPendientesResponse,
+  CxcCargaSireResponse,
+  CxcDocumento,
+  CxcCargaDetraccionesResponse,
+  CxcDetraccion,
 } from "../models/conciliacionBcp";
 
 const BASE_URL = "/finanzas/conciliacion";
@@ -115,6 +119,37 @@ export async function actualizarClasificacionMovimientoConciliacionV1(
       timeout: 30000,
     }
   );
+}
+
+export async function cargarSireCxc(params: {
+  nombreArchivo: string;
+  contenido: string;
+  soloAnalizar: boolean;
+}): Promise<CxcCargaSireResponse> {
+  return await httpClient.post<CxcCargaSireResponse>("/finanzas/cxc/carga-sire", params, {
+    timeout: 120000,
+  });
+}
+
+export async function cargarDetraccionesCxc(params: {
+  nombreArchivo: string;
+  contenido: string;
+  soloAnalizar: boolean;
+}): Promise<CxcCargaDetraccionesResponse> {
+  return await httpClient.post<CxcCargaDetraccionesResponse>("/finanzas/cxc/carga-detracciones", params, {
+    timeout: 120000,
+  });
+}
+
+export async function obtenerDetraccionesCxc(): Promise<CxcDetraccion[]> {
+  return await httpClient.get<CxcDetraccion[]>("/finanzas/cxc/detracciones", { timeout: 30000 });
+}
+
+export async function obtenerDocumentosCxc(periodo?: string | null): Promise<CxcDocumento[]> {
+  return await httpClient.get<CxcDocumento[]>("/finanzas/cxc/documentos", {
+    params: { periodo: periodo || undefined },
+    timeout: 30000,
+  });
 }
 
 export async function obtenerIngresosPendientes(params: {
