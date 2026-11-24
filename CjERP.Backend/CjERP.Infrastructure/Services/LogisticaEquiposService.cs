@@ -541,22 +541,26 @@ public class LogisticaEquiposService : ILogisticaEquiposService
         CancellationToken cancellationToken = default)
     {
         await using var connection = _sqlCommandFactory.CreateConnection();
+        var parametros = new DynamicParameters();
+        parametros.Add("@NroSolicitud", request.NroSolicitud);
+        parametros.Add("@Posicion", request.Posicion);
+        parametros.Add("@Correlativo", NullIfWhiteSpace(request.Correlativo));
+        parametros.Add("@Campos", string.Join(",", request.Campos));
+        parametros.Add("@Observacion", request.Observacion);
+        parametros.Add("@Serie", request.Serie);
+        parametros.Add("@IdEstado", request.IdEstado);
+        parametros.Add("@Cantidad", request.Cantidad);
+        parametros.Add("@Usuario", usuario);
+        parametros.Add("@IdEmpleadoCj", idEmpleadoCj);
+        // @NroGuia solo se envía al editar ese campo: así el SP anterior (sin el parámetro) sigue funcionando para el resto.
+        if (request.Campos.Any(c => string.Equals(c, "nroguia", StringComparison.OrdinalIgnoreCase)))
+            parametros.Add("@NroGuia", request.NroGuia);
+        if (request.Campos.Any(c => string.Equals(c, "cantsap", StringComparison.OrdinalIgnoreCase)))
+            parametros.Add("@CantSap", request.CantSap);
         await EjecutarAsync(() => connection.ExecuteAsync(
             _sqlCommandFactory.Create(
                 CampoActualizarSp,
-                new
-                {
-                    NroSolicitud = request.NroSolicitud,
-                    Posicion = request.Posicion,
-                    Correlativo = NullIfWhiteSpace(request.Correlativo),
-                    Campos = string.Join(",", request.Campos),
-                    Observacion = request.Observacion,
-                    Serie = request.Serie,
-                    request.IdEstado,
-                    request.Cantidad,
-                    Usuario = usuario,
-                    IdEmpleadoCj = idEmpleadoCj,
-                },
+                parametros,
                 CommandType.StoredProcedure,
                 cancellationToken,
                 commandTimeout: 180)));

@@ -9,6 +9,7 @@ type CampoBuscableProps = {
   onChange: (id: string | null) => void;
   placeholder: string;
   style?: CSSProperties;
+  disabled?: boolean;
 };
 
 const LIMITE_LISTA = 50;
@@ -21,7 +22,7 @@ const normalizar = (texto: string) =>
  * Campo de texto con lista desplegable: se digita parte del nombre para filtrar y queda elegida la opción cuando el texto
  * coincide con una de la lista (sin importar tildes ni mayúsculas). Mientras no coincida, el valor es null.
  */
-function CampoBuscableBase({ opciones: opcionesOriginales, value, onChange, placeholder, style }: CampoBuscableProps) {
+function CampoBuscableBase({ opciones: opcionesOriginales, value, onChange, placeholder, style, disabled }: CampoBuscableProps) {
   const listaId = useId();
   // Si dos opciones tienen el mismo nombre (p. ej. distritos homónimos), se distinguen con su código: antes ambas apuntaban a la
   // misma y no se podía elegir la otra (volvía siempre a la inicial).
@@ -63,6 +64,7 @@ function CampoBuscableBase({ opciones: opcionesOriginales, value, onChange, plac
       <input
         list={listaId}
         value={texto}
+        disabled={disabled}
         placeholder={placeholder}
         aria-label={placeholder}
         aria-invalid={sinCoincidencia}

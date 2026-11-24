@@ -360,6 +360,7 @@ export type CampoLinea = {
   observacion?: string | null;
   rutaImagen?: string | null;
   imagenEnvio?: string | null;
+  nroGuia?: string | null;
   idEstado: number;
   nomEstado?: string | null;
   idCliente?: number | null;

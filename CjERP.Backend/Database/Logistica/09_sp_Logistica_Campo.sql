@@ -52,6 +52,7 @@ BEGIN
          CAST(b.Observacion AS nvarchar(500))     AS Observacion,
          CAST(b.RutaImagen AS nvarchar(500))      AS RutaImagen,
          CAST(b.ImagenEnvio AS nvarchar(500))     AS ImagenEnvio,
+         b.NroGuia                                AS NroGuia,   -- numero de guia
          b.IdEstado,
          e.ValorIni                               AS NomEstado,
          b.IdCliente, b.IdProyecto,
@@ -147,8 +148,8 @@ BEGIN
   INNER JOIN dbo.DetSolicitud b ON CAST(b.NroSolicitud AS nvarchar(50)) = x.Nro AND CAST(b.Posicion AS nvarchar(20)) = x.Pos
                                AND b.IdDespacho = 1 AND b.IdEstado = 11;
 
-  IF EXISTS (SELECT 1 FROM @m WHERE Conf < 0 OR Conf > CantEnv OR Conf <> FLOOR(Conf))
-    THROW 51304, 'La cantidad conforme debe ser un entero entre 0 y la cantidad enviada.', 1;
+  IF EXISTS (SELECT 1 FROM @m WHERE Conf < 0 OR Conf > CantEnv)
+    THROW 51304, 'La cantidad conforme debe estar entre 0 y la cantidad real (admite decimales).', 1;
   IF EXISTS (SELECT 1 FROM @m WHERE IdEstadoNuevo = 10 AND Obs IS NULL)
     THROW 51305, 'Hay registros observados (estado 10 o cantidad distinta) sin observacion.', 1;
 

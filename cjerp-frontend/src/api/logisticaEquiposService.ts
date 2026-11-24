@@ -155,10 +155,13 @@ export type CampoActualizar = {
   nroSolicitud: string;
   posicion: string;
   correlativo?: string | null;
-  /** Que campos se cambian: "observacion" | "serie" | "estado". */
-  campos: Array<"observacion" | "serie" | "estado">;
+  /** Que campos se cambian: "observacion" | "serie" | "nroguia" | "cantsap" | "estado". */
+  campos: Array<"observacion" | "serie" | "nroguia" | "cantsap" | "estado">;
   observacion?: string;
   serie?: string;
+  nroGuia?: string;
+  /** Cantidad real (DetSolicitud.CantSap), solo con campos = ["cantsap"]. */
+  cantSap?: number;
   idEstado?: number | null;
   cantidad?: number | null;
 };

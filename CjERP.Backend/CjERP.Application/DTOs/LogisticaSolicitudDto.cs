@@ -251,6 +251,7 @@ public class LogisticaCampoLineaDto
     public string? Observacion { get; set; }
     public string? RutaImagen { get; set; }
     public string? ImagenEnvio { get; set; }
+    public string? NroGuia { get; set; }
     public int IdEstado { get; set; }
     public string? NomEstado { get; set; }
     public int? IdCliente { get; set; }
@@ -285,6 +286,9 @@ public class LogisticaCampoActualizarDto
     public List<string> Campos { get; set; } = new();
     public string? Observacion { get; set; }
     public string? Serie { get; set; }
+    public string? NroGuia { get; set; }
+    /// <summary>Cantidad real (DetSolicitud.CantSap); solo con Campos = cantsap.</summary>
+    public decimal? CantSap { get; set; }
     /// <summary>14 (conforme / x cruzar) o 10 (observada); ejecuta el flujo completo de sp_Logistica_Campo_Grabar.</summary>
     public int? IdEstado { get; set; }
     public decimal? Cantidad { get; set; }

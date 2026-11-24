@@ -1370,6 +1370,8 @@ function CellEditor<T extends object>({
           if (!finished.current) onCancel();
         }}
       >
+        {/* Sin valor se muestra una opción vacía: si no, la primera opción aparece ya elegida y no se puede seleccionar (no dispara onChange). */}
+        {value == null && <option value="">Seleccione…</option>}
         {col.lookup.map((entry) => (
           <option key={String(entry.value)} value={String(entry.value)}>{entry.label}</option>
         ))}
