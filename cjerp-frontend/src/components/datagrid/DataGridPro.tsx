@@ -231,6 +231,44 @@ export default function DataGridPro<T extends object>({
   const dragField = useRef<string | null>(null);
   const resizing = useRef<{ field: string; startX: number; startWidth: number } | null>(null);
 
+  // Barra de scroll horizontal superior, sincronizada con la del cuerpo de la grilla.
+  const topBarRef = useRef<HTMLDivElement | null>(null);
+  const scrollBodyRef = useRef<HTMLDivElement | null>(null);
+  const [topBarWidth, setTopBarWidth] = useState(0);
+  const [topBarViewport, setTopBarViewport] = useState(0);
+  const [hasHScroll, setHasHScroll] = useState(false);
+
+  useEffect(() => {
+    const body = scrollBodyRef.current;
+    if (!body) return undefined;
+    const measure = () => {
+      setTopBarWidth(body.scrollWidth);
+      setTopBarViewport(body.clientWidth);
+      setHasHScroll(body.scrollWidth > body.clientWidth + 1);
+    };
+    measure();
+    const observer = typeof ResizeObserver !== "undefined" ? new ResizeObserver(measure) : null;
+    observer?.observe(body);
+    if (body.firstElementChild) observer?.observe(body.firstElementChild);
+    window.addEventListener("resize", measure);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener("resize", measure);
+    };
+  }, []);
+
+  const syncScroll = (from: "top" | "body") => {
+    const top = topBarRef.current;
+    const body = scrollBodyRef.current;
+    if (!top || !body) return;
+    // Solo se asigna si difiere: el evento de eco encuentra valores iguales y no hace nada.
+    if (from === "top") {
+      if (body.scrollLeft !== top.scrollLeft) body.scrollLeft = top.scrollLeft;
+    } else if (top.scrollLeft !== body.scrollLeft) {
+      top.scrollLeft = body.scrollLeft;
+    }
+  };
+
   useEffect(() => {
     const timer = window.setTimeout(() => {
       setSearch(searchInput);
@@ -518,7 +556,8 @@ export default function DataGridPro<T extends object>({
     const XLSX = await import("xlsx");
     const exportCols = orderedFields
       .filter((f) => !hidden.has(f))
-      .map((f) => colMap.get(f) as GridColumn<T>);
+      .map((f) => colMap.get(f) as GridColumn<T>)
+      .filter((c) => c.allowExport !== false);
     const data = sorted.map((row) =>
       Object.fromEntries(
         exportCols.map((c) => {
@@ -775,7 +814,21 @@ export default function DataGridPro<T extends object>({
       </div>
 
       {/* Tabla */}
-      <div style={height === "fill" ? { ...styles.scroll, flex: 1, minHeight: 0 } : { ...styles.scroll, maxHeight: height }}>
+      {hasHScroll ? (
+        <div
+          ref={topBarRef}
+          onScroll={() => syncScroll("top")}
+          style={{ overflowX: "auto", overflowY: "hidden", width: topBarViewport || "100%", flexShrink: 0 }}
+          aria-hidden="true"
+        >
+          <div style={{ width: topBarWidth, height: 1 }} />
+        </div>
+      ) : null}
+      <div
+        ref={scrollBodyRef}
+        onScroll={() => syncScroll("body")}
+        style={height === "fill" ? { ...styles.scroll, flex: 1, minHeight: 0 } : { ...styles.scroll, maxHeight: height }}
+      >
         <table style={{ ...styles.table, width: tableWidth, minWidth: "100%" }}>
           <colgroup>
             {selection !== "none" ? <col style={{ width: SELECT_WIDTH }} /> : null}

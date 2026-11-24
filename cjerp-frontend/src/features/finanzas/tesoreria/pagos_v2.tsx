@@ -1054,7 +1054,11 @@ const CAMPOS_TOTALES_DIFERIDOS = [
   "TotalPagar",
 ] as const;
 
+// El SP de totales paga un costo fijo por llamada (tablas temporales, tempdb, CPU del servidor): se mide ~4 s
+// aun con 400 correlativos. Dividir en lotes en paralelo repite ese costo y compite por los mismos recursos,
+// por eso va una sola llamada (lote grande, sin paralelismo).
 const TOTALES_DIFERIDOS_LOTE = 7500;
+const TOTALES_PARALELO = 1;
 // Hasta esta cantidad de filas se espera la respuesta de totales antes de pintar (una sola carga visible).
 const TOTALES_UNA_CARGA_MAX_FILAS = 100;
 
@@ -1767,8 +1771,14 @@ export default function PagosV2Page() {
       setTotalesCargando(true);
 
       try {
+        // Lotes pequeños en paralelo (hasta TOTALES_PARALELO a la vez): una sola consulta con >1000 correlativos
+        // era el cuello de botella de la pestaña % Ficticio. Cada lote conserva su reintento por deadlock.
+        const lotes: number[][] = [];
         for (let inicio = 0; inicio < correlativos.length; inicio += TOTALES_DIFERIDOS_LOTE) {
-          const lote = correlativos.slice(inicio, inicio + TOTALES_DIFERIDOS_LOTE);
+          lotes.push(correlativos.slice(inicio, inicio + TOTALES_DIFERIDOS_LOTE));
+        }
+        let siguienteLote = 0;
+        const procesarLote = async (lote: number[]) => {
           const requestTotales = buildPagosV1PlanillaRequest(
             [{ nombre: "Correlativos", valor: lote.join(","), tipo: "string" }, ...tiposCambio],
             "pagos-v2-totales",
@@ -1786,7 +1796,7 @@ export default function PagosV2Page() {
               await new Promise((resolve) => setTimeout(resolve, 800 * intento));
             }
           }
-          if (signal.aborted) return null;
+          if (signal.aborted) return;
 
           for (const item of Array.isArray(response?.rows) ? response.rows : []) {
             totales.set(
@@ -1794,8 +1804,16 @@ export default function PagosV2Page() {
               item,
             );
           }
-
-        }
+        };
+        await Promise.all(
+          Array.from({ length: Math.min(TOTALES_PARALELO, lotes.length) }, async () => {
+            while (siguienteLote < lotes.length && !signal.aborted) {
+              const lote = lotes[siguienteLote];
+              siguienteLote += 1;
+              await procesarLote(lote);
+            }
+          }),
+        );
 
         if (signal.aborted) return null;
         const filasCompletas = aplicarTotalesDiferidos(filas, totales);

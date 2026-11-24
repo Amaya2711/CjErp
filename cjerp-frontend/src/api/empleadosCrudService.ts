@@ -20,6 +20,7 @@ export type EmpleadoCrudItem = {
   soValidador: string;
   terValidador: string;
   fechaIngreso: string;
+  fecNacimiento: string;
   fechaIniLaboral: string;
   fechaFinLaboral: string;
   direccion: string;
@@ -48,6 +49,7 @@ export type EmpleadoCrudSaveRequest = {
   correo?: string | null;
   direccion?: string | null;
   fechaIngreso?: string | null;
+  fecNacimiento?: string | null;
   fechaIniLaboral?: string | null;
   fechaFinLaboral?: string | null;
   idEmpresaCj: number | null;
@@ -106,6 +108,7 @@ function mapItem(raw: Record<string, unknown>): EmpleadoCrudItem {
     soValidador: toStringValue(raw.soValidador ?? raw.SoValidador ?? raw.solValidador ?? raw.SolValidador),
     terValidador: toStringValue(raw.terValidador ?? raw.TerValidador ?? raw.tercerValidador ?? raw.TercerValidador),
     fechaIngreso: toStringValue(raw.fechaingreso ?? raw.fechaIngreso ?? raw.FechaIngreso),
+    fecNacimiento: toStringValue(raw.fecNacimiento ?? raw.FecNacimiento),
     fechaIniLaboral: toStringValue(raw.fechaIniLaboral ?? raw.FechaIniLaboral),
     fechaFinLaboral: toStringValue(raw.fechaFinLaboral ?? raw.FechaFinLaboral),
     direccion: toStringValue(raw.direccion ?? raw.Direccion),

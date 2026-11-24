@@ -1,4 +1,4 @@
-﻿import { useEffect, useMemo, useRef, useState } from "react";
+﻿import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import AppCard from "../../components/base/AppCard";
 import AppPage from "../../components/base/AppPage";
 import AppStatusMessage from "../../components/base/AppStatusMessage";
@@ -29,6 +29,7 @@ type EmpleadoForm = {
   telefono: string;
   correo: string;
   direccion: string;
+  fecNacimiento: string;
   fechaIniLaboral: string;
   fechaFinLaboral: string;
   idEmpresaCj: string;
@@ -60,6 +61,7 @@ type EmpleadoGridRow = {
   responsable: string;
   soValidador: string;
   terValidador: string;
+  fecNacimiento: string;
   fechaIniLaboral: string;
   fechaFinLaboral: string;
   nroDocumento: string;
@@ -128,6 +130,7 @@ const initialForm: EmpleadoForm = {
   telefono: "",
   correo: "",
   direccion: "",
+  fecNacimiento: "",
   fechaIniLaboral: "",
   fechaFinLaboral: "",
   idEmpresaCj: "",
@@ -267,6 +270,7 @@ function mapItemToForm(
     telefono: normalizeTextValue(item.telefono),
     correo: normalizeUppercase(normalizeTextValue(item.correo)),
     direccion: normalizeUppercase(normalizeTextValue(item.direccion)),
+    fecNacimiento: normalizeTextValue(item.fecNacimiento).slice(0, 10),
     fechaIniLaboral: normalizeTextValue(item.fechaIniLaboral),
     fechaFinLaboral: normalizeTextValue(item.fechaFinLaboral),
     idEmpresaCj: normalizeOptionValue(item.idEmpresaCj),
@@ -332,6 +336,7 @@ function buildPayload(
     telefono: form.telefono.trim() || null,
     correo: normalizeUppercase(form.correo).trim() || null,
     direccion: normalizeUppercase(form.direccion).trim() || null,
+    fecNacimiento: form.fecNacimiento || null,
     fechaIniLaboral: form.fechaIniLaboral || null,
     fechaFinLaboral: form.fechaFinLaboral || null,
     idEmpresaCj: form.idEmpresaCj ? Number(form.idEmpresaCj) : null,
@@ -835,6 +840,62 @@ export default function MantenimientoEmpleadosPage() {
     }
   };
 
+  const handleFecNacimientoChange = async (item: EmpleadoCrudItem, value: string) => {
+    const nextValue = value.trim();
+    const currentValue = normalizeTextValue(item.fecNacimiento).slice(0, 10);
+
+    // Vacío o sin cambios: no se guarda (el SP conserva la fecha previa cuando llega NULL).
+    if (!nextValue || nextValue === currentValue) {
+      return;
+    }
+
+    const parsed = new Date(`${nextValue}T00:00:00`);
+    if (Number.isNaN(parsed.getTime()) || nextValue < "1900-01-01" || parsed > new Date()) {
+      setError("Ingrese una fecha de nacimiento válida (entre 1900 y hoy).");
+      return;
+    }
+
+    const updateKey = `${item.idEmpleado}-fecNacimiento`;
+    setUpdatingOrganizationField(updateKey);
+    setError("");
+    setSuccess("");
+
+    try {
+      const updated = await empleadosCrudService.actualizar(item.idEmpleado, { fecNacimiento: nextValue });
+      setItems((current) => current.map((row) => (row.idEmpleado === item.idEmpleado ? updated : row)));
+      setSuccess(`Fecha de nacimiento actualizada para ${item.nombreEmpleado}.`);
+    } catch (err) {
+      setError(getHttpErrorMessage(err, "No se pudo actualizar la fecha de nacimiento."));
+    } finally {
+      setUpdatingOrganizationField(null);
+    }
+  };
+
+  const renderFecNacimientoInput = (item: EmpleadoCrudItem) => {
+    const isUpdating = updatingOrganizationField === `${item.idEmpleado}-fecNacimiento`;
+    const currentValue = normalizeTextValue(item.fecNacimiento).slice(0, 10);
+
+    return (
+      <input
+        key={`${item.idEmpleado}-${currentValue}`}
+        type="date"
+        defaultValue={currentValue}
+        min="1900-01-01"
+        max={new Date().toISOString().slice(0, 10)}
+        disabled={updatingOrganizationField !== null}
+        aria-label={`Fecha de nacimiento de ${item.nombreEmpleado}`}
+        title={isUpdating ? "Actualizando fecha de nacimiento..." : "Cambiar fecha de nacimiento"}
+        onBlur={(event) => void handleFecNacimientoChange(item, event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") {
+            event.currentTarget.blur();
+          }
+        }}
+        style={{ ...styles.inlineLookupSelect, minWidth: 120, ...(isUpdating ? styles.inlineLookupSelectSaving : {}) }}
+      />
+    );
+  };
+
   const handleDelete = async () => {
     if (!deleteItem) return;
 
@@ -926,6 +987,7 @@ export default function MantenimientoEmpleadosPage() {
         responsable: item.responsable || "",
         soValidador: item.soValidador || "",
         terValidador: item.terValidador || "",
+        fecNacimiento: formatDateValue(item.fecNacimiento),
         fechaIniLaboral: formatDateValue(item.fechaIniLaboral),
         fechaFinLaboral: formatDateValue(item.fechaFinLaboral),
         nroDocumento: item.nroDocumento || "",
@@ -934,6 +996,10 @@ export default function MantenimientoEmpleadosPage() {
       })),
     [filteredItems]
   );
+
+  // Filas que realmente muestra la grilla (pestaña + filtros de la pantalla + filtros/búsqueda de columnas).
+  const [visibleCount, setVisibleCount] = useState<number | null>(null);
+  const handleVisibleRowsChange = useCallback((rows: EmpleadoGridRow[]) => setVisibleCount(rows.length), []);
 
   const gridColumns: GridColumn<EmpleadoGridRow>[] = [
     { dataField: "idEmpleado", caption: "Id", dataType: "number", width: 80, fixed: true },
@@ -982,6 +1048,12 @@ export default function MantenimientoEmpleadosPage() {
       cellRender: (_value, row) =>
         renderOrganizationSelect(row.item, "terceraValidacion", tercerValidadores),
     },
+    {
+      dataField: "fecNacimiento",
+      caption: "Nacimiento",
+      width: 150,
+      cellRender: (_value, row) => renderFecNacimientoInput(row.item),
+    },
     { dataField: "fechaIniLaboral", caption: "Inicio", width: 125 },
     { dataField: "fechaFinLaboral", caption: "Fin", width: 125 },
     { dataField: "nroDocumento", caption: "Documento", width: 120 },
@@ -996,6 +1068,7 @@ export default function MantenimientoEmpleadosPage() {
       allowGrouping: false,
       allowHeaderFilter: false,
       allowSearch: false,
+      allowExport: false,
       calculateCellValue: () => "",
       cellRender: (_value, row) => {
         const item = row.item;
@@ -1157,12 +1230,11 @@ export default function MantenimientoEmpleadosPage() {
         <div style={styles.cardInner}>
           <div style={styles.headerRow}>
             <div>
-              <h2 style={styles.title}>Crud de empleados</h2>
               <p style={styles.subtitle}>
                 Mantenimiento de ficha laboral en base a `sp_EmpleadoCj_Ficha`.
               </p>
             </div>
-            <div style={styles.counter}>{filteredItems.length} registro(s)</div>
+            <div style={styles.counter}>{visibleCount ?? gridRows.length} registro(s)</div>
           </div>
 
           <DataGridPro<EmpleadoGridRow>
@@ -1173,8 +1245,10 @@ export default function MantenimientoEmpleadosPage() {
             loading={loading}
             noDataText="No se encontraron empleados."
             stateStoringKey="mantenimiento-empleados"
+            onVisibleRowsChange={handleVisibleRowsChange}
             showSearchPanel={false}
-            allowExport={false}
+            allowExport
+            exportFileName="empleados"
             autoExpandAll={false}
             rowAlternation={false}
             rowPadding="4px 8px"
@@ -1548,6 +1622,17 @@ export default function MantenimientoEmpleadosPage() {
                   </option>
                 ))}
               </select>
+            }
+          />
+          <Field
+            label="Fecha de nacimiento"
+            input={
+              <input
+                type="date"
+                value={form.fecNacimiento}
+                onChange={(event) => setForm((prev) => ({ ...prev, fecNacimiento: event.target.value }))}
+                style={getInputStyle(false)}
+              />
             }
           />
           <Field

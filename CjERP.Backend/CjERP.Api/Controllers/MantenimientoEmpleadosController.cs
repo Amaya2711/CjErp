@@ -518,6 +518,7 @@ public class MantenimientoEmpleadosController : ControllerBase
             Correo = string.IsNullOrWhiteSpace(request.Correo) ? before.Correo : request.Correo,
             Direccion = string.IsNullOrWhiteSpace(request.Direccion) ? before.Direccion : request.Direccion,
             FechaIngreso = string.IsNullOrWhiteSpace(request.FechaIngreso) ? before.FechaIngreso : request.FechaIngreso,
+            FecNacimiento = string.IsNullOrWhiteSpace(request.FecNacimiento) ? before.FecNacimiento : request.FecNacimiento,
             FechaIniLaboral = string.IsNullOrWhiteSpace(request.FechaIniLaboral) ? before.FechaIniLaboral : request.FechaIniLaboral,
             FechaFinLaboral = string.IsNullOrWhiteSpace(request.FechaFinLaboral) ? before.FechaFinLaboral : request.FechaFinLaboral,
             IdPuesto = request.IdPuesto,
@@ -1017,6 +1018,18 @@ public class MantenimientoEmpleadosController : ControllerBase
                     commandType: CommandType.Text,
                     cancellationToken: cancellationToken));
 
+            var fecNacimiento = ParseNullableDate(request.FecNacimiento);
+            if (fecNacimiento.HasValue)
+            {
+                await connection.ExecuteAsync(
+                    new CommandDefinition(
+                        "UPDATE dbo.EmpleadoCj SET FecNacimiento = @FecNacimiento WHERE IdEmpleado = @IdEmpleado;",
+                        new { FecNacimiento = fecNacimiento.Value, IdEmpleado = idEmpleado },
+                        transaction: transaction,
+                        commandType: CommandType.Text,
+                        cancellationToken: cancellationToken));
+            }
+
             await UpsertEmpleadoDetalleAsync(connection, idEmpleado, request, transaction, cancellationToken);
             await transaction.CommitAsync(cancellationToken);
             return idEmpleado;
@@ -1173,6 +1186,7 @@ public class MantenimientoEmpleadosController : ControllerBase
         parameters.Add("@Telefono", NormalizeOptionalString(request.Telefono), DbType.String);
         parameters.Add("@Correo", NormalizeOptionalString(request.Correo), DbType.String);
         parameters.Add("@FechaIngreso", ParseNullableDate(request.FechaIngreso), DbType.Date);
+        parameters.Add("@FecNacimiento", ParseNullableDate(request.FecNacimiento), DbType.Date);
         parameters.Add("@FechaIniLaboral", ParseNullableDate(request.FechaIniLaboral), DbType.Date);
         parameters.Add("@FechaFinLaboral", ParseNullableDate(request.FechaFinLaboral), DbType.Date);
         parameters.Add("@IdPuesto", request.IdPuesto, DbType.Int32);
@@ -1199,6 +1213,7 @@ public class MantenimientoEmpleadosController : ControllerBase
         parameters.Add("@Telefono", NormalizeOptionalString(request.Telefono), DbType.String);
         parameters.Add("@Correo", NormalizeOptionalString(request.Correo), DbType.String);
         parameters.Add("@FechaIngreso", ParseNullableDate(request.FechaIngreso), DbType.Date);
+        parameters.Add("@FecNacimiento", ParseNullableDate(request.FecNacimiento), DbType.Date);
         parameters.Add("@FechaIniLaboral", ParseNullableDate(request.FechaIniLaboral), DbType.Date);
         parameters.Add("@FechaFinLaboral", ParseNullableDate(request.FechaFinLaboral), DbType.Date);
         parameters.Add("@IdPuesto", request.IdPuesto, DbType.Int32);
@@ -1233,6 +1248,7 @@ public class MantenimientoEmpleadosController : ControllerBase
             Responsable = GetString(values, "Responsable", "responsable"),
             SoValidador = GetString(values, "SoValidador", "soValidador", "SolValidador", "solValidador"),
             TerValidador = GetString(values, "TerValidador", "terValidador", "TercerValidador", "tercerValidador"),
+            FecNacimiento = GetDateString(values, "FecNacimiento", "fecNacimiento"),
             FechaIniLaboral = GetDateString(values, "FechaIniLaboral", "fechaIniLaboral"),
             FechaIngreso = GetDateString(values, "FechaIngreso", "fechaIngreso", "fechaingreso"),
             FechaFinLaboral = GetDateString(values, "FechaFinLaboral", "fechaFinLaboral"),
@@ -2867,6 +2883,7 @@ public class MantenimientoEmpleadosController : ControllerBase
             ["Telefono"] = new("Principal", NullIfWhiteSpace(item.Telefono)),
             ["Correo"] = new("Principal", NullIfWhiteSpace(item.Correo)),
             ["Direccion"] = new("Principal", NullIfWhiteSpace(item.Direccion)),
+            ["FecNacimiento"] = new("Principal", NullIfWhiteSpace(item.FecNacimiento)),
             ["FechaIngreso"] = new("Laboral", NullIfWhiteSpace(item.FechaIngreso)),
             ["FechaIniLaboral"] = new("Laboral", NullIfWhiteSpace(item.FechaIniLaboral)),
             ["FechaFinLaboral"] = new("Laboral", NullIfWhiteSpace(item.FechaFinLaboral)),
@@ -2918,6 +2935,7 @@ public class MantenimientoEmpleadosController : ControllerBase
         public string Responsable { get; set; } = string.Empty;
         public string SoValidador { get; set; } = string.Empty;
         public string TerValidador { get; set; } = string.Empty;
+        public string FecNacimiento { get; set; } = string.Empty;
         public string FechaIniLaboral { get; set; } = string.Empty;
         public string FechaFinLaboral { get; set; } = string.Empty;
         public string FechaBaja { get; set; } = string.Empty;
@@ -2950,6 +2968,7 @@ public class MantenimientoEmpleadosController : ControllerBase
         public string? Correo { get; set; }
         public string? Direccion { get; set; }
         public string? FechaIngreso { get; set; }
+        public string? FecNacimiento { get; set; }
         public string? FechaIniLaboral { get; set; }
         public string? FechaFinLaboral { get; set; }
         public int? IdPuesto { get; set; }

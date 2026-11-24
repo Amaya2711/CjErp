@@ -33,6 +33,8 @@ export type GridColumn<T extends object = Record<string, unknown>> = {
   allowResizing?: boolean;
   allowEditing?: boolean;
   allowSearch?: boolean;
+  /** Incluir la columna en la exportación a Excel (por defecto: sí). */
+  allowExport?: boolean;
   /** Agrupación inicial (orden de los niveles). */
   groupIndex?: number;
   /** Orden inicial. */

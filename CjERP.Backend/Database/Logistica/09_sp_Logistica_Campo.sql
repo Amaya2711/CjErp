@@ -54,7 +54,7 @@ BEGIN
          CAST(b.ImagenEnvio AS nvarchar(500))     AS ImagenEnvio,
          b.NroGuia                                AS NroGuia,   -- numero de guia
          b.IdEstado,
-         e.ValorIni                               AS NomEstado,
+         e.ValorFin                               AS NomEstado,   -- nombre visible del estado = Constante ESTADO_LOG.ValorFin
          b.IdCliente, b.IdProyecto,
          CAST(b.IdSite AS nvarchar(50))           AS IdSite,
          b.CorreSite,
