@@ -6,6 +6,8 @@ import type {
   CampoGrabarResultado,
   CampoItem,
   CampoLinea,
+  DashboardEquipos,
+  DashboardEquiposConsulta,
   IngresoCambioEstado,
   IngresoCambioEstadoResultado,
   IngresoCargaResultado,
@@ -149,6 +151,11 @@ export async function listarDetalleSolicitud(nroSolicitud: string) {
 
 export async function consultarCampo(consulta: CampoConsulta) {
   return await httpClient.post<CampoLinea[]>("/logistica/equipos/campo/consultar", consulta);
+}
+
+/** Resumen ejecutivo (dashboard) sobre todas las solicitudes, sin importar su estado; filtros opcionales por cliente-proyecto-site. */
+export async function consultarDashboardEquipos(consulta: DashboardEquiposConsulta) {
+  return await httpClient.post<DashboardEquipos>("/logistica/equipos/dashboard/resumen", consulta, { timeout: 120000 });
 }
 
 export type CampoActualizar = {

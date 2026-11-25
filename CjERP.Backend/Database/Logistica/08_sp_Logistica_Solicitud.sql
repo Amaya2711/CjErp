@@ -254,8 +254,12 @@ BEGIN
          CAST(a.Referencia AS nvarchar(300))            AS Referencia,
          det.Lineas,
          det.Cantidad,
-         a.IdEstado
-  FROM dbo.CabSolicitud a
+         CAST(9 AS int)                                 AS IdEstado
+  -- Una sola cabecera por solicitud (el sistema antiguo crea 2: destino IdMovimiento = 1 y origen = 2): la de destino. Ver script 19.
+  FROM (SELECT c.*,
+               ROW_NUMBER() OVER (PARTITION BY c.NroSolicitud
+                                  ORDER BY CASE WHEN c.IdMovimiento = 1 THEN 0 ELSE 1 END, c.IdMovimiento) AS rn
+        FROM dbo.CabSolicitud c) a
   OUTER APPLY (SELECT COUNT(*) AS Lineas, SUM(b.CantSap) AS Cantidad
                FROM dbo.DetSolicitud b
                WHERE b.NroSolicitud = a.NroSolicitud AND b.IdDespacho = 1 AND b.IdEstado = 9) det
@@ -264,7 +268,8 @@ BEGIN
   LEFT JOIN dbo.Site s       ON s.IdSite = a.IdSite AND s.Correlativo = a.CorreSite
   LEFT JOIN dbo.Empleado sol ON sol.IdEmpleado = a.IdSolicitante
   LEFT JOIN dbo.Constante fe ON fe.Campo = 'FORMA_ENVIO' AND fe.Correlativo = a.FormaEnvio
-  WHERE a.IdEstado = 9 AND ISNULL(det.Lineas, 0) > 0
+  -- Pendiente = tiene lineas de destino en estado 9 (la cabecera de solicitudes antiguas puede estar en 3).
+  WHERE a.rn = 1 AND ISNULL(det.Lineas, 0) > 0
     AND (@IdCliente IS NULL OR a.IdCliente = @IdCliente)
     AND (@IdProyecto IS NULL OR a.IdProyecto = @IdProyecto)
     AND (@IdSite IS NULL OR (a.IdSite = @IdSite AND a.CorreSite = ISNULL(@CorreSite, a.CorreSite)))
@@ -338,7 +343,7 @@ BEGIN
   WHERE LTRIM(RTRIM(ISNULL(j.nroSolicitud, N''))) <> N'';
 
   IF NOT EXISTS (SELECT 1 FROM @s) THROW 51224, 'No hay solicitudes seleccionadas.', 1;
-  IF EXISTS (SELECT 1 FROM @s x WHERE NOT EXISTS (SELECT 1 FROM dbo.CabSolicitud a WHERE a.NroSolicitud = x.Nro AND a.IdEstado = 9))
+  IF EXISTS (SELECT 1 FROM @s x WHERE NOT EXISTS (SELECT 1 FROM dbo.DetSolicitud b WHERE b.NroSolicitud = x.Nro AND b.IdDespacho = 1 AND b.IdEstado = 9))
     THROW 51225, 'Hay solicitudes que ya no estan pendientes de aprobacion. Vuelva a consultar.', 1;
 
   DECLARE @estadoNuevo int = CASE WHEN @Accion = 'APROBAR' THEN 4 ELSE 6 END;

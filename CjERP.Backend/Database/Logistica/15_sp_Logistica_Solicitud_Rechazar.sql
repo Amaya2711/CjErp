@@ -40,8 +40,12 @@ BEGIN
 
   IF NOT EXISTS (SELECT 1 FROM @s) THROW 51232, 'No hay solicitudes seleccionadas.', 1;
 
-  UPDATE x SET x.EstadoAnterior = a.IdEstado
-  FROM @s x INNER JOIN dbo.CabSolicitud a ON a.NroSolicitud = x.Nro;
+  -- Estado anterior: 9 si la solicitud tiene lineas de destino pendientes de aprobacion (en solicitudes antiguas la cabecera puede
+  -- estar en 3 con las lineas en 9); si no, el de la cabecera.
+  UPDATE x SET x.EstadoAnterior = CASE WHEN EXISTS (SELECT 1 FROM dbo.DetSolicitud b
+                                                    WHERE b.NroSolicitud = x.Nro AND b.IdDespacho = 1 AND b.IdEstado = 9)
+                                       THEN 9 ELSE a.IdEstado END
+  FROM @s x INNER JOIN (SELECT NroSolicitud, MIN(IdEstado) AS IdEstado FROM dbo.CabSolicitud GROUP BY NroSolicitud) a ON a.NroSolicitud = x.Nro;
 
   IF EXISTS (SELECT 1 FROM @s WHERE EstadoAnterior = 6)
     THROW 51235, 'No se puede rechazar una solicitud que ya esta rechazada.', 1;
@@ -90,7 +94,7 @@ BEGIN
     FROM dbo.CabSolicitud a
     WHERE a.NroSolicitud IN (SELECT Nro FROM @s)
       AND NOT EXISTS (SELECT 1 FROM dbo.DetSolicitud b
-                      WHERE b.NroSolicitud = a.NroSolicitud AND b.IdDespacho = 1 AND b.IdEstado = a.IdEstado);
+                      WHERE b.NroSolicitud = a.NroSolicitud AND b.IdDespacho = 1 AND b.IdEstado IN (9, 3));
 
     UPDATE l SET l.IdEstado = 2
     FROM dbo.DetLogistica l

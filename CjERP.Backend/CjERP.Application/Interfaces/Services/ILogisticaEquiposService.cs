@@ -111,6 +111,11 @@ public interface ILogisticaEquiposService
         string nroSolicitud,
         CancellationToken cancellationToken = default);
 
+    // ---- Dashboard ----
+    Task<LogisticaDashboardDto> ObtenerDashboardAsync(
+        LogisticaDashboardConsultaDto consulta,
+        CancellationToken cancellationToken = default);
+
     // ---- x Campo ----
     Task<IEnumerable<LogisticaCampoLineaDto>> ConsultarCampoAsync(
         LogisticaCampoConsultaDto consulta,

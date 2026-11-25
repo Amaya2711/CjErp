@@ -35,6 +35,8 @@ const IngresoEquipoPage = lazy(() => import("../../features/logistica/gestionequ
 const GestionEquiposDemoPage = lazy(() => import("../../features/logistica/gestionequipos/demo"));
 const GestionEquiposAllPage = lazy(() => import("../../features/logistica/gestionequipos/all"));
 const CampoEquipoPage = lazy(() => import("../../features/logistica/gestionequipos/campoequipo"));
+const AprobarEquipoPage = lazy(() => import("../../features/logistica/gestionequipos/aprobar"));
+const CierreEquipoPage = lazy(() => import("../../features/logistica/gestionequipos/cierre"));
 const ReporteResponsablePage = lazy(() => import("../../features/reportes/gerencial/responsable"));
 const SolicitudEquipoPage = lazy(() => import("../../features/logistica/gestionequipos/solicitudequipo"));
 const TesoreriaDepositoPage = lazy(() => import("../../features/finanzas/tesoreria/deposito"));
@@ -316,6 +318,14 @@ export default function AppRouter() {
             <Route
               path="/logistica/gestionequipos/campoequipo"
               element={<CampoEquipoPage />}
+            />
+            <Route
+              path="/logistica/gestionequipos/aprobar"
+              element={<AprobarEquipoPage />}
+            />
+            <Route
+              path="/logistica/gestionequipos/cierre"
+              element={<CierreEquipoPage />}
             />
             <Route
               path="/logistica/gestionequipos/recojo"

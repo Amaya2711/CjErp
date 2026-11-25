@@ -21,7 +21,7 @@ SET NOCOUNT ON;
 GO
 
 /* ------------------------------------------------------------------------------------------------
-   Consulta: lineas en estado 11 con filtros opcionales.
+   Consulta: lineas en estado 11 (o @IdEstado: Observadas usa 10; -1 = todos los estados, para el Reporte) con filtros opcionales.
 ------------------------------------------------------------------------------------------------ */
 CREATE OR ALTER PROCEDURE dbo.sp_Logistica_Campo_Consultar
   @Solicitudes  nvarchar(max) = NULL,   -- lista separada por comas
@@ -31,15 +31,21 @@ CREATE OR ALTER PROCEDURE dbo.sp_Logistica_Campo_Consultar
   @IdCliente    int           = NULL,
   @IdProyecto   int           = NULL,
   @IdSite       nvarchar(50)  = NULL,
-  @CorreSite    int           = NULL
+  @CorreSite    int           = NULL,
+  @IdEstado     int           = NULL,   -- NULL = 11 (pendientes de campo); 10 = observadas; -1 = todos los estados (Reporte)
+  @Estados      nvarchar(100) = NULL,   -- lista de estados separada por comas (p. ej. '14' x cruzar, '21,7,22,23,24,25' x cerrar, '16,22,23,25' x foliar); tiene prioridad sobre @IdEstado
+  @PorSolicitud bit           = 0,      -- 1 = como el sistema antiguo: trae TODAS las lineas (cualquier estado) de las solicitudes que tengan al menos una linea en @Estados
+  @SoloEquipos  bit           = 0       -- 1 = solo materiales cuyo CodPap empieza con 10 o 40 (x foliar)
 AS
 BEGIN
   SET NOCOUNT ON;
 
   SET @Solicitudes = NULLIF(LTRIM(RTRIM(@Solicitudes)), N'');
   SET @IdSite = NULLIF(LTRIM(RTRIM(@IdSite)), N'');
+  SET @Estados = NULLIF(LTRIM(RTRIM(@Estados)), N'');
 
-  SELECT TOP (5000)
+  -- Sin el tope de 5000 de antes: en modo @PorSolicitud hay mas lineas y se truncaria silenciosamente (el sistema antiguo no tiene tope).
+  SELECT TOP (50000)
          CAST(b.NroSolicitud AS nvarchar(50))     AS NroSolicitud,
          CAST(b.PedidoSap AS nvarchar(50))        AS PedidoSap,
          CAST(b.Correlativo AS nvarchar(50))      AS Correlativo,
@@ -74,7 +80,15 @@ BEGIN
   LEFT JOIN dbo.Site s          ON s.IdSite = b.IdSite AND s.Correlativo = b.CorreSite
   LEFT JOIN dbo.Proyecto pr     ON pr.IdProyecto = b.IdProyecto
   LEFT JOIN dbo.Cliente cl      ON cl.IdCliente = b.IdCliente
-  WHERE b.IdEstado = 11 AND b.IdDespacho = 1
+  WHERE b.IdDespacho = 1
+    AND ((@Estados IS NOT NULL AND @PorSolicitud = 0
+          AND b.IdEstado IN (SELECT TRY_CONVERT(int, LTRIM(RTRIM(x.value))) FROM STRING_SPLIT(@Estados, N',') x))
+         OR (@Estados IS NOT NULL AND @PorSolicitud = 1
+          AND EXISTS (SELECT 1 FROM dbo.DetSolicitud d
+                      WHERE d.NroSolicitud = b.NroSolicitud AND d.IdDespacho = 1
+                        AND d.IdEstado IN (SELECT TRY_CONVERT(int, LTRIM(RTRIM(x.value))) FROM STRING_SPLIT(@Estados, N',') x)))
+         OR (@Estados IS NULL AND (@IdEstado = -1 OR b.IdEstado = ISNULL(@IdEstado, 11))))
+    AND (@SoloEquipos = 0 OR LEFT(CAST(b.CodPap AS nvarchar(50)), 2) IN (N'10', N'40'))
     AND (@Solicitudes IS NULL OR CAST(b.NroSolicitud AS nvarchar(50)) IN
            (SELECT LTRIM(RTRIM(x.value)) FROM STRING_SPLIT(@Solicitudes, N',') x WHERE LTRIM(RTRIM(x.value)) <> N''))
     AND (@FechaIni IS NULL OR CAST(a.FechaCreacion AS date) >= @FechaIni)

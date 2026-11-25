@@ -36,6 +36,7 @@ public class LogisticaEquiposService : ILogisticaEquiposService
     private const string CampoConsultarSp = "dbo.sp_Logistica_Campo_Consultar";
     private const string CampoGrabarSp = "dbo.sp_Logistica_Campo_Grabar";
     private const string CampoActualizarSp = "dbo.sp_Logistica_Campo_ActualizarLinea";
+    private const string DashboardSp = "dbo.sp_Logistica_Dashboard_Resumen";
 
     private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
 
@@ -483,6 +484,35 @@ public class LogisticaEquiposService : ILogisticaEquiposService
                 commandTimeout: 60));
     }
 
+    // ---- Dashboard ----
+
+    public async Task<LogisticaDashboardDto> ObtenerDashboardAsync(
+        LogisticaDashboardConsultaDto consulta,
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = _sqlCommandFactory.CreateConnection();
+        var parametros = new DynamicParameters();
+        parametros.Add("@IdCliente", consulta.IdCliente);
+        parametros.Add("@IdProyecto", consulta.IdProyecto);
+        parametros.Add("@IdSite", NullIfWhiteSpace(consulta.IdSite));
+        parametros.Add("@CorreSite", consulta.CorreSite);
+
+        return await EjecutarAsync(async () =>
+        {
+            using var multi = await connection.QueryMultipleAsync(
+                _sqlCommandFactory.Create(DashboardSp, parametros, CommandType.StoredProcedure, cancellationToken, commandTimeout: 120));
+            return new LogisticaDashboardDto
+            {
+                Resumen = (await multi.ReadAsync<LogisticaDashboardResumenDto>()).FirstOrDefault() ?? new LogisticaDashboardResumenDto(),
+                Estados = (await multi.ReadAsync<LogisticaDashboardEstadoDto>()).ToList(),
+                Antiguedad = (await multi.ReadAsync<LogisticaDashboardAntiguedadDto>()).ToList(),
+                Tendencia = (await multi.ReadAsync<LogisticaDashboardTendenciaDto>()).ToList(),
+                Proyectos = (await multi.ReadAsync<LogisticaDashboardProyectoDto>()).ToList(),
+                Antiguas = (await multi.ReadAsync<LogisticaDashboardAntiguaDto>()).ToList(),
+            };
+        });
+    }
+
     // ---- x Campo ----
 
     public async Task<IEnumerable<LogisticaCampoLineaDto>> ConsultarCampoAsync(
@@ -490,20 +520,30 @@ public class LogisticaEquiposService : ILogisticaEquiposService
         CancellationToken cancellationToken = default)
     {
         await using var connection = _sqlCommandFactory.CreateConnection();
+        var parametros = new DynamicParameters();
+        parametros.Add("@Solicitudes", NullIfWhiteSpace(consulta.Solicitudes));
+        parametros.Add("@FechaIni", consulta.FechaIni?.Date);
+        parametros.Add("@FechaFin", consulta.FechaFin?.Date);
+        parametros.Add("@IdRespCampo", consulta.IdRespCampo);
+        parametros.Add("@IdCliente", consulta.IdCliente);
+        parametros.Add("@IdProyecto", consulta.IdProyecto);
+        parametros.Add("@IdSite", NullIfWhiteSpace(consulta.IdSite));
+        parametros.Add("@CorreSite", consulta.CorreSite);
+        // @IdEstado solo se envia cuando no es el 11 de siempre: asi el SP anterior (sin el parametro) sigue funcionando para x Campo.
+        if (consulta.IdEstado is { } idEstado && idEstado != 11)
+            parametros.Add("@IdEstado", idEstado);
+        // @Estados solo se envia cuando se pide (pagina Cierre): el SP anterior sigue funcionando para el resto de pestanas.
+        if (NullIfWhiteSpace(consulta.Estados) is { } estados)
+            parametros.Add("@Estados", estados);
+        // Igual que @Estados: solo se envian cuando se piden (script 20 / 09 actualizado).
+        if (consulta.PorSolicitud)
+            parametros.Add("@PorSolicitud", true);
+        if (consulta.SoloEquipos)
+            parametros.Add("@SoloEquipos", true);
         return await EjecutarAsync(() => connection.QueryAsync<LogisticaCampoLineaDto>(
             _sqlCommandFactory.Create(
                 CampoConsultarSp,
-                new
-                {
-                    Solicitudes = NullIfWhiteSpace(consulta.Solicitudes),
-                    FechaIni = consulta.FechaIni?.Date,
-                    FechaFin = consulta.FechaFin?.Date,
-                    consulta.IdRespCampo,
-                    consulta.IdCliente,
-                    consulta.IdProyecto,
-                    IdSite = NullIfWhiteSpace(consulta.IdSite),
-                    consulta.CorreSite,
-                },
+                parametros,
                 CommandType.StoredProcedure,
                 cancellationToken,
                 commandTimeout: 120)));

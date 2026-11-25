@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import CampoBuscable, { type OpcionBuscable } from "../solicitud/CampoBuscable";
 import ConfirmDialog from "../../../../../components/base/ConfirmDialog";
 import DataGridPro from "../../../../../components/datagrid/DataGridPro";
 import type { GridColumn } from "../../../../../components/datagrid/types";
 import { FiltroOperativoLookup } from "../../../../../components/lookups/FiltroOperativoLookup";
-import { actualizarLineaCampo, consultarCampo, grabarCampo, listarCatalogosSolicitud } from "../../../../../api/logisticaEquiposService";
+import { actualizarLineaCampo, consultarCampo, grabarCampo } from "../../../../../api/logisticaEquiposService";
 import type { FiltroOperativoValue } from "../../../../../models/filtroOperativo";
-import type { CampoLinea, SolicitudCatalogo } from "../../../../../models/logisticaEquipos";
+import type { CampoLinea } from "../../../../../models/logisticaEquipos";
 import { getHttpErrorMessage } from "../../../../../utils/httpError";
+import { abrirAdjunto, esCodigoLegacy } from "../../../../../utils/adjuntos";
 import { getConstantesPorCampo } from "../../../../../api/constantesService";
 import { ingresoStyles as styles } from "../ingreso/ingresoComun";
 
@@ -34,8 +34,40 @@ const aFila = (l: CampoLinea): FilaCampo => ({
   obs: l.observacion ?? "",
 });
 
-/** Pestaña "x Campo": conformidad de lo enviado a campo (estado 11 → 14 x cruzar, o 10 observada). */
-export default function CampoTab() {
+/**
+ * Pestaña "x Campo": conformidad de lo enviado a campo (estado 11 → 14 x cruzar, o 10 observada).
+ * `modo` define la pestaña:
+ *  - "campo": líneas pendientes (estado 11), con edición y conformidad.
+ *  - "observadas": líneas en estado 10, solo consulta.
+ *  - "reporte": líneas de TODAS las solicitudes sin importar su estado, solo consulta; no se carga nada hasta aplicar filtros.
+ */
+export type ModoCampoTab = "campo" | "observadas" | "reporte";
+
+export default function CampoTab({
+  modo = "campo",
+  solicitudInicial = "",
+  estados,
+  porSolicitud,
+  soloEquipos,
+  etapa,
+}: {
+  modo?: ModoCampoTab;
+  solicitudInicial?: string;
+  /** Estados a consultar, separados por comas (página Cierre: "14", "21,7,22,23,24,25", "16,22,23,25"). Solo consulta. */
+  estados?: string;
+  /** Como el sistema antiguo: trae todas las líneas de las solicitudes que tengan al menos una línea en `estados`. */
+  porSolicitud?: boolean;
+  /** Solo materiales con código 10 o 40 (x Foliar). */
+  soloEquipos?: boolean;
+  /** Nombre de la etapa (p. ej. "x Cruzar") para los textos de la pestaña cuando se usa `estados`. */
+  etapa?: string;
+}) {
+  const soloObservadas = modo === "observadas";
+  const esReporte = modo === "reporte";
+  const porEstados = !!estados;
+  const soloConsulta = modo !== "campo" || porEstados;
+  // 10 = observadas; -1 = todos los estados (reporte); vacío = 11 (x Campo).
+  const idEstadoConsulta = soloObservadas ? 10 : esReporte ? -1 : undefined;
   // Estados: sp_Constante_ListarPorCampo @Campo='ESTADO_LOG', solo los códigos de esta pestaña.
   const [estadosCampo, setEstadosCampo] = useState<{ value: number; label: string }[]>([]);
   useEffect(() => {
@@ -57,17 +89,12 @@ export default function CampoTab() {
       cancelled = true;
     };
   }, []);
-  const [responsables, setResponsables] = useState<SolicitudCatalogo[]>([]);
-  // Responsable: campo con búsqueda por texto (se escribe parte del nombre y la lista se va filtrando).
-  const opcionesResponsable = useMemo<OpcionBuscable[]>(() => responsables.map((r) => ({ id: String(r.id), etiqueta: r.nombre ?? String(r.id) })), [responsables]);
-  const alResponsable = useCallback((id: string | null) => setIdResponsable(id === null ? null : Number(id)), []);
-  const [usaSolicitudes, setUsaSolicitudes] = useState(false);
-  const [solicitudes, setSolicitudes] = useState("");
+  // Con `solicitudInicial` (por ejemplo, desde el Dashboard) se abre con ese documento ya filtrado.
+  const [usaSolicitudes, setUsaSolicitudes] = useState(solicitudInicial !== "");
+  const [solicitudes, setSolicitudes] = useState(solicitudInicial);
   const [usaFecha, setUsaFecha] = useState(false);
   const [fechaIni, setFechaIni] = useState(hoyIso());
   const [fechaFin, setFechaFin] = useState(hoyIso());
-  const [usaResponsable, setUsaResponsable] = useState(false);
-  const [idResponsable, setIdResponsable] = useState<number | null>(null);
   const [usaRelacion, setUsaRelacion] = useState(false);
   const [relacion, setRelacion] = useState<FiltroOperativoValue>({});
 
@@ -88,6 +115,10 @@ export default function CampoTab() {
       setError("Seleccione la relación cliente-proyecto-site.");
       return;
     }
+    if (esReporte && !usaSolicitudes && !usaFecha && !usaRelacion) {
+      setError("Active al menos un filtro (Solicitud(es), Fecha de creación o Cliente-proyecto-site) y pulse Buscar.");
+      return;
+    }
     setCargando(true);
     setError("");
     try {
@@ -95,11 +126,14 @@ export default function CampoTab() {
         solicitudes: usaSolicitudes ? solicitudes.trim() : undefined,
         fechaIni: usaFecha ? fechaIni : undefined,
         fechaFin: usaFecha ? fechaFin : undefined,
-        idRespCampo: usaResponsable ? idResponsable : undefined,
         idCliente: f?.idCliente,
         idProyecto: f?.idProyecto,
         idSite: f?.idSite,
         correSite: f?.correlativo,
+        idEstado: idEstadoConsulta,
+        estados,
+        porSolicitud,
+        soloEquipos,
       });
       setFilas(data.map(aFila));
       setSeleccion([]);
@@ -108,16 +142,20 @@ export default function CampoTab() {
     } finally {
       setCargando(false);
     }
-  }, [usaSolicitudes, solicitudes, usaFecha, fechaIni, fechaFin, usaResponsable, idResponsable, usaRelacion, relacion]);
+  }, [usaSolicitudes, solicitudes, usaFecha, fechaIni, fechaFin, usaRelacion, relacion, idEstadoConsulta, esReporte]);
 
   // Como en el formulario antiguo, al abrir la pestaña se cargan las líneas pendientes.
   useEffect(() => {
+    // Reporte: no se carga nada al abrir; solo se muestra lo que piden los filtros al pulsar Buscar.
+    if (esReporte) {
+      setCargando(false);
+      return;
+    }
     let cancelled = false;
-    Promise.all([consultarCampo({}), listarCatalogosSolicitud()])
-      .then(([data, cat]) => {
+    consultarCampo({ idEstado: idEstadoConsulta, solicitudes: solicitudInicial || undefined, estados, porSolicitud, soloEquipos })
+      .then((data) => {
         if (cancelled) return;
         setFilas(data.map(aFila));
-        setResponsables(cat.filter((c) => c.tipo === "SOLICITANTE"));
       })
       .catch((err) => {
         if (!cancelled) setError(getHttpErrorMessage(err, "No se pudo consultar."));
@@ -280,9 +318,33 @@ export default function CampoTab() {
   const actualizar = (clave: string, cambios: Partial<FilaCampo>) =>
     setFilas((actuales) => actuales.map((f) => (f.clave === clave ? { ...f, ...cambios } : f)));
 
+  /**
+   * Botón que abre la imagen de la línea. Regla de adjuntos del sistema: un código numérico está en el servidor antiguo
+   * (se descarga por la API y se abre); cualquier otra ruta o URL es de SharePoint.
+   */
+  const botonImagen = (titulo: string) => (valor: unknown) => {
+    const ruta = String(valor ?? "").trim();
+    if (!ruta) return <span style={{ color: "#CBD5E1" }}>—</span>;
+    return (
+      <button
+        type="button"
+        title={`${titulo} (${esCodigoLegacy(ruta) ? "servidor antiguo" : "SharePoint"})`}
+        onClick={(e) => {
+          e.stopPropagation();
+          setError("");
+          void abrirAdjunto(ruta).catch((err) => setError(getHttpErrorMessage(err, `No se pudo abrir: ${titulo.toLowerCase()}.`)));
+        }}
+        style={{ border: "1px solid #1F6F8B", background: "#FFFFFF", color: "#1F6F8B", borderRadius: 6, padding: "1px 10px", fontSize: 11, fontWeight: 600, cursor: "pointer" }}
+      >
+        Ver
+      </button>
+    );
+  };
+
   const columnasBase = useMemo<GridColumn<FilaCampo>[]>(
     () => [
       { dataField: "nroSolicitud", caption: "Nro. solicitud", width: 110, fixed: true },
+      { dataField: "posicion", caption: "Pos.", width: 60, fixed: true, placeAfter: "nroSolicitud" },
       { dataField: "estadoNuevo", caption: "Estado", width: 160, fixed: true, allowEditing: true, lookup: estadosCampo, cellStyle: (v) => (v ? { fontWeight: 700, color: "#1F6F8B" } : { color: "#94A3B8" }) },
       { dataField: "codPap", caption: "Código", width: 110 },
       { dataField: "nombreMaterial", caption: "Material", width: 300 },
@@ -290,10 +352,11 @@ export default function CampoTab() {
       { dataField: "cantConforme", caption: "Cant. conforme", dataType: "number", width: 110, allowEditing: false },
       { dataField: "cantSap", caption: "Cant. Real", dataType: "number", width: 100, allowEditing: true },
       { dataField: "serie", caption: "Serie", width: 140, allowEditing: true },
-      { dataField: "obs", caption: "Observación", width: 240, allowEditing: true },
-      { dataField: "posicion", caption: "Pos.", width: 60 },
-      { dataField: "pedidoSap", caption: "Pedido SAP", width: 120 },
-      { dataField: "nroGuia", caption: "Nro. guía", width: 130, allowEditing: true },
+      { dataField: "pedidoSap", caption: "Pedido SAP", width: 120, placeAfter: "serie" },
+      { dataField: "nroGuia", caption: "Nro. guía", width: 130, allowEditing: true, placeAfter: "pedidoSap" },
+      { dataField: "rutaImagen", caption: "Imagen", width: 80, alignment: "center", placeAfter: "nroGuia", allowFiltering: false, allowSorting: false, cellRender: botonImagen("Imagen") },
+      { dataField: "imagenEnvio", caption: "Imagen envío", width: 100, alignment: "center", placeAfter: "nroGuia", allowFiltering: false, allowSorting: false, cellRender: botonImagen("Imagen de envío") },
+      { dataField: "obs", caption: "Observación", width: 240, allowEditing: true, placeAfter: "imagenEnvio" },
       { dataField: "nombreCliente", caption: "Cliente", width: 160 },
       { dataField: "nombreProyecto", caption: "Proyecto", width: 180, groupIndex: 0 },
       { dataField: "idSite", caption: "Site", width: 90 },
@@ -306,9 +369,16 @@ export default function CampoTab() {
   );
 
   // DataGridPro deja editable toda columna sin allowEditing:false: aquí se editan Estado, Observación, Serie, Nro. guía y Cant. Real.
+  // En Observadas (solo consulta) no hay edición ni las columnas de la conformidad (Estado a elegir y Cant. conforme).
   const columnas = useMemo<GridColumn<FilaCampo>[]>(
-    () => columnasBase.map((c) => ({ ...c, allowEditing: c.dataField === "estadoNuevo" || c.dataField === "obs" || c.dataField === "serie" || c.dataField === "nroGuia" || c.dataField === "cantSap" })),
-    [columnasBase],
+    () =>
+      columnasBase
+        .filter((c) => !soloConsulta || (c.dataField !== "estadoNuevo" && c.dataField !== "cantConforme"))
+        .map((c) => ({
+          ...c,
+          allowEditing: !soloConsulta && (c.dataField === "estadoNuevo" || c.dataField === "obs" || c.dataField === "serie" || c.dataField === "nroGuia" || c.dataField === "cantSap"),
+        })),
+    [columnasBase, soloConsulta],
   );
 
   return (
@@ -331,18 +401,6 @@ export default function CampoTab() {
         </label>
         <input type="date" value={fechaIni} disabled={!usaFecha} onChange={(e) => setFechaIni(e.target.value)} style={styles.input} />
         <input type="date" value={fechaFin} disabled={!usaFecha} onChange={(e) => setFechaFin(e.target.value)} style={styles.input} />
-        <label style={styles.check}>
-          <input type="checkbox" checked={usaResponsable} onChange={(e) => setUsaResponsable(e.target.checked)} />
-          Responsable
-        </label>
-        <CampoBuscable
-          opciones={opcionesResponsable}
-          value={idResponsable === null ? null : String(idResponsable)}
-          onChange={alResponsable}
-          placeholder="Escriba para buscar…"
-          disabled={!usaResponsable}
-          style={{ ...styles.input, minWidth: 260 }}
-        />
       </div>
 
       <div style={styles.panel}>
@@ -356,14 +414,22 @@ export default function CampoTab() {
         <button type="button" onClick={() => void buscar()} disabled={cargando} style={styles.secondary}>
           {cargando ? "Buscando…" : "Buscar"}
         </button>
-        <button type="button" onClick={pedirConfirmacion} disabled={guardando || cargando} style={styles.primary}>
-          {guardando ? "Grabando…" : "Grabar conformidad"}
-        </button>
+        {soloConsulta ? null : (
+          <button type="button" onClick={pedirConfirmacion} disabled={guardando || cargando} style={styles.primary}>
+            {guardando ? "Grabando…" : "Grabar conformidad"}
+          </button>
+        )}
       </div>
 
       <div style={styles.toolbar}>
         <span style={styles.resumen}>
-          Son: {filas.length}. Marcados: {claves.size}. Si cambia la cantidad conforme o elige OBSERVADA, indique la observación.
+          {porEstados
+            ? `Son: ${filas.length} línea(s) en ${etapa ?? "estados " + estados}.`
+            : esReporte
+            ? `Son: ${filas.length} línea(s), de cualquier estado, según los filtros aplicados.`
+            : soloObservadas
+              ? `Son: ${filas.length} línea(s) observada(s) (estado 10).`
+              : `Son: ${filas.length}. Marcados: ${claves.size}. Si cambia la cantidad conforme o elige OBSERVADA, indique la observación.`}
         </span>
       </div>
 
@@ -377,9 +443,9 @@ export default function CampoTab() {
           keyExpr="clave"
           height="fill"
           loading={cargando}
-          noDataText="No hay líneas pendientes de conformidad en campo."
-          stateStoringKey="logistica-campo-v4"
-          selection="multiple"
+          noDataText={porEstados ? `No hay líneas en ${etapa ?? "estos estados"}.` : esReporte ? "Active un filtro y pulse Buscar para ver el reporte." : soloObservadas ? "No hay líneas observadas." : "No hay líneas pendientes de conformidad en campo."}
+          stateStoringKey={porEstados ? `logistica-cierre-${estados}-v1` : esReporte ? "logistica-reporte-v1" : soloObservadas ? "logistica-observadas-v1" : "logistica-campo-v4"}
+          selection={soloConsulta ? "none" : "multiple"}
           selectedKeys={Array.from(claves)}
           selectionDisabled={guardando}
           onSelectionChanged={(keys) => {
@@ -394,7 +460,7 @@ export default function CampoTab() {
             );
           }}
           editing={{
-            allowUpdating: true,
+            allowUpdating: !soloConsulta,
             editOnClick: true,
             onCellChanged: ({ key, field, value }) => {
               if (field === "estadoNuevo") void guardarCelda(String(key), "estado", value === "" || value === null ? null : Number(value));
@@ -408,7 +474,7 @@ export default function CampoTab() {
           rowStyle={(f) => (esObservada(f) && claves.has(f.clave) ? { color: "#B45309", fontWeight: 600 } : undefined)}
           showSearchPanel={false}
           allowExport
-          exportFileName="logistica_campo"
+          exportFileName={porEstados ? `logistica_${(etapa ?? "cierre").replace(/\s+/g, "_").toLowerCase()}` : esReporte ? "logistica_reporte" : soloObservadas ? "logistica_observadas" : "logistica_campo"}
           rowAlternation={false}
           rowPadding="3px 8px"
           paging={{ pageSize: 100, pageSizes: [50, 100, 250, 500] }}

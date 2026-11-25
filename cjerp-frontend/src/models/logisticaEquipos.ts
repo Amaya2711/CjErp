@@ -345,6 +345,56 @@ export type CampoConsulta = {
   idProyecto?: number;
   idSite?: string;
   correSite?: number;
+  /** Estado de las líneas: vacío = 11 (pendientes de campo); 10 = observadas; -1 = todos los estados (reporte). */
+  idEstado?: number;
+  /** Estados separados por comas (p. ej. "21,7,22"); tiene prioridad sobre idEstado. Página Cierre. */
+  estados?: string;
+  /** true = como el sistema antiguo: todas las líneas (cualquier estado) de las solicitudes con al menos una línea en `estados`. */
+  porSolicitud?: boolean;
+  /** true = solo materiales con código 10 o 40 (x Foliar). */
+  soloEquipos?: boolean;
+};
+
+/** Dashboard de logística de equipos: resumen ejecutivo de solicitudes y x Campo. */
+export type DashboardEquiposConsulta = {
+  idCliente?: number;
+  idProyecto?: number;
+  idSite?: string;
+  correSite?: number;
+};
+
+export type DashboardEquiposResumen = {
+  solicitudes: number;
+  lineas: number;
+  lineasPendientes: number;
+  solicitudesPendientes: number;
+  lineasObservadas: number;
+  solicitudesObservadas: number;
+  diasMaxPendiente?: number | null;
+  diasPromPendiente?: number | null;
+};
+
+export type DashboardEquiposEstado = { idEstado: number; estado: string; lineas: number; solicitudes: number };
+export type DashboardEquiposAntiguedad = { rango: string; orden: number; lineas: number };
+export type DashboardEquiposTendencia = { fecha: string; solicitudes: number };
+export type DashboardEquiposProyecto = { proyecto: string; pendientes: number; observadas: number; total: number };
+export type DashboardEquiposAntigua = {
+  nroSolicitud: string;
+  fechaCreacion?: string | null;
+  dias: number;
+  lineas: number;
+  estado?: string | null;
+  proyecto?: string | null;
+  site?: string | null;
+};
+
+export type DashboardEquipos = {
+  resumen: DashboardEquiposResumen;
+  estados: DashboardEquiposEstado[];
+  antiguedad: DashboardEquiposAntiguedad[];
+  tendencia: DashboardEquiposTendencia[];
+  proyectos: DashboardEquiposProyecto[];
+  antiguas: DashboardEquiposAntigua[];
 };
 
 export type CampoLinea = {

@@ -47,7 +47,7 @@ import PagoSumaResponsable from "./PagoSumaResponsable";
 import DataGridPro from "../../../components/datagrid/DataGridPro";
 import type { GridColumn } from "../../../components/datagrid/types";
 
-// "ficticio": todos los registros de Aprobar/Re-aprobar/Hormiga/Observadas con % Ficticio mayor a UMBRAL_FICTICIO_ALTO.
+// "ficticio": registros de Re-aprobar/Hormiga con % Ficticio mayor a UMBRAL_FICTICIO_ALTO.
 type PagoTabKey = "aprobar" | "reaprobar" | "hormiga" | "observadas" | "resumen" | "ficticio";
 type DetailTabKey = "orden" | "resumen" | "suma-resp" | "con-pagado" | "historial" | "historial-oc";
 
@@ -229,10 +229,12 @@ type ResumenOtDetalle = {
   porcentajeOcAdelanto: number;
 };
 
-const TAB_ORDER: PagoTabKey[] = ["aprobar", "reaprobar", "hormiga", "observadas", "resumen", "ficticio"];
+const TAB_ORDER: PagoTabKey[] = ["aprobar", "reaprobar", "ficticio", "hormiga", "observadas", "resumen"];
 
-// Estados que reúnen las bandejas operativas (Aprobar 0, Re-aprobar 6, Hormiga 10, Observadas 2 y 7).
-const ESTADOS_BANDEJAS = "0,2,6,7,10";
+// La pestaña "% Ficticio" solo reúne Re-aprobar (6) y Hormiga (10); Aprobar y Observadas no se consideran.
+const ESTADOS_BANDEJAS = "6,10";
+const ESTADOS_CON_CORTE_FICTICIO = ["6", "10"];
+const tabTieneCorteFicticio = (tab: PagoTabKey) => tab === "reaprobar" || tab === "hormiga";
 // La pestaña "Alto % Ficticio" muestra los registros cuyo % Ficticio supera este valor.
 const UMBRAL_FICTICIO_ALTO = 70;
 
@@ -257,8 +259,8 @@ function groupRowsByEstado(rows: PagoRow[]): Record<PagoTabKey, PagoRow[]> {
   }
 
   grouped.resumen = rows;
-  // La consulta de esta pestaña ya se limita a los estados de las bandejas; el corte por % Ficticio se aplica al filtrar.
-  grouped.ficticio = rows;
+  // Solo Re-aprobar y Hormiga; el corte por % Ficticio se aplica al filtrar.
+  grouped.ficticio = rows.filter((row) => ESTADOS_CON_CORTE_FICTICIO.includes(row.estadoCodigo ?? ""));
   return grouped;
 }
 
@@ -310,10 +312,10 @@ const TAB_THEME: Record<PagoTabKey, TabTheme> = {
 const PAGO_TABS: Array<{ key: PagoTabKey; label: string; icon: React.ReactNode }> = [
   { key: "aprobar", label: "Aprobar", icon: <ReceiptText size={14} /> },
   { key: "reaprobar", label: "Re-aprobar", icon: <RotateCcw size={14} /> },
+  { key: "ficticio", label: `% Ficticio > ${UMBRAL_FICTICIO_ALTO}`, icon: <AlertTriangle size={14} /> },
   { key: "hormiga", label: "Hormiga", icon: <HandCoins size={14} /> },
   { key: "observadas", label: "Observadas", icon: <AlertTriangle size={14} /> },
   { key: "resumen", label: "Total Órdenes", icon: <ShieldCheck size={14} /> },
-  { key: "ficticio", label: `% Ficticio > ${UMBRAL_FICTICIO_ALTO}`, icon: <AlertTriangle size={14} /> },
 ];
 
 const TAB_ACTION_KEYS: Record<PagoEstado | "ficticio", string> = {
@@ -2166,7 +2168,7 @@ export default function PagosV2Page() {
         const pocasFilas =
           usoLigero &&
           nextRowsByTab[activeTab].length > 0 &&
-          (activeTab !== "resumen" || nextRowsByTab[activeTab].length <= TOTALES_UNA_CARGA_MAX_FILAS);
+          (activeTab === "ficticio" || tabTieneCorteFicticio(activeTab) || nextRowsByTab[activeTab].length <= TOTALES_UNA_CARGA_MAX_FILAS);
         if (pocasFilas) {
           const completas = await cargarTotalesDiferidos(activeTab, nextRowsByTab[activeTab], cacheKey, parametros, signal, true);
           if (signal.aborted || cancelled) return;
@@ -2291,10 +2293,9 @@ export default function PagosV2Page() {
           row.idSolicitante !== 0 &&
           // % Ficticio depende de los totales diferidos: la lista se completa sola cuando llegan.
           // La pestaña % Ficticio muestra los > UMBRAL; las bandejas, solo los <= UMBRAL.
-          (activeTab === "resumen" ||
-            (activeTab === "ficticio"
-              ? calcPctFicticioFila(row) > UMBRAL_FICTICIO_ALTO
-              : calcPctFicticioFila(row) <= UMBRAL_FICTICIO_ALTO))
+          (activeTab === "ficticio"
+            ? calcPctFicticioFila(row) > UMBRAL_FICTICIO_ALTO
+            : !tabTieneCorteFicticio(activeTab) || calcPctFicticioFila(row) <= UMBRAL_FICTICIO_ALTO)
       ),
     [activeTab, rowsByTab]
   );
@@ -3406,6 +3407,7 @@ export default function PagosV2Page() {
           quaternary: { label: "Regularizar", icon: <ShieldCheck size={18} />, color: "#0F766E", soft: "#F0FDFA", border: "#5EEAD4" },
         };
       case "reaprobar":
+      case "ficticio": // % Ficticio > 70 usa los mismos botones que Re-aprobar
         return {
           primary: { label: "Re-aprobar", icon: <RotateCcw size={18} />, color: "#1D4ED8", soft: "#EFF6FF", border: "#93C5FD" },
           secondary: { label: "Observar", icon: <Eye size={18} />, color: "#F59E0B", soft: "#FFFBEB", border: "#FCD34D" },
@@ -3436,8 +3438,8 @@ export default function PagosV2Page() {
         };
     }
   }, [activeTab]);
-  // Total Órdenes y % Ficticio solo consultan/exportan (sin aprobar, observar ni rechazar).
-  const isResumenTab = activeTab === "resumen" || activeTab === "ficticio";
+  // Total Órdenes solo consulta/exporta (sin aprobar, observar ni rechazar). % Ficticio usa los botones de Re-aprobar.
+  const isResumenTab = activeTab === "resumen";
   // El estado propio de Planilla se expone en Total Órdenes y en % Ficticio (mezcla estados de varias bandejas);
   // las demás pestañas ya representan un estado operativo específico.
   const showEstadoPlanilla = activeTab === "resumen" || activeTab === "ficticio";
@@ -3508,18 +3510,25 @@ export default function PagosV2Page() {
       });
       return;
     }
+    // En % Ficticio conviven Re-aprobar (6) y Hormiga (10): re-aprobar/regularizar solo aplica a los de estado 6.
+    const filasReaprobables =
+      activeTab === "ficticio" ? selectedRows.filter((row) => row.estadoCodigo === "6") : selectedRows;
+    if ((label === "Regularizar" || label === "Re-aprobar") && filasReaprobables.length === 0) {
+      setMessage("Seleccione al menos un registro de Re-aprobar (estado 6): los de Hormiga no se re-aprueban.");
+      return;
+    }
     if (label === "Regularizar") {
-      setRegularizarConfirm({ rowsCount: selectedRows.length });
+      setRegularizarConfirm({ rowsCount: filasReaprobables.length });
       return;
     }
     if (label === "Re-aprobar") {
       setAprobarConfirm({
-        rowsCount: selectedRows.length,
+        rowsCount: filasReaprobables.length,
         // El SP interpreta 6 como segunda aprobación y realiza la
         // transición interna hacia el estado final 1.
         codEstado: 6,
         titulo: "Re-aprobar",
-        mensaje: `¿Desea re-aprobar ${selectedRows.length} registro(s) seleccionado(s)?`,
+        mensaje: `¿Desea re-aprobar ${filasReaprobables.length} registro(s) seleccionado(s)?`,
       });
       return;
     }
@@ -3695,7 +3704,13 @@ export default function PagosV2Page() {
     omitirConfirmacion: boolean = false,
     codEstado: number = 10
   ) => {
-    if (activeTab !== "aprobar" && activeTab !== "reaprobar" && activeTab !== "hormiga" && activeTab !== "observadas") {
+    if (
+      activeTab !== "aprobar" &&
+      activeTab !== "reaprobar" &&
+      activeTab !== "hormiga" &&
+      activeTab !== "observadas" &&
+      activeTab !== "ficticio"
+    ) {
       return;
     }
 
@@ -3716,7 +3731,12 @@ export default function PagosV2Page() {
     }
 
     // El SP (script Finanzas/15) admite primera aprobación desde estados 0, 2 y 7.
-    const filasAProcesar = selectedRows;
+    // En % Ficticio (estados 6 y 10) solo se re-aprueba/regulariza lo de estado 6, igual que en Re-aprobar.
+    const filasAProcesar = activeTab === "ficticio" ? selectedRows.filter((row) => row.estadoCodigo === "6") : selectedRows;
+    if (filasAProcesar.length === 0) {
+      setMessage("Seleccione al menos un registro de Re-aprobar (estado 6).");
+      return;
+    }
 
     try {
       // Envío en bloques de 40: cada bloque es una transacción corta en el SP (sin bloqueos largos sobre Planilla).
@@ -4034,7 +4054,7 @@ export default function PagosV2Page() {
     setRegularizarConfirm(null);
     // En Re-aprobar los recibos están en estado 6: el SP solo acepta CodEstado 6 (re-aprobación) y
     // la primera aprobación (10) exige estado 0 o 2.
-    await handleAprobarSeleccionados(1, true, activeTab === "reaprobar" ? 6 : 10);
+    await handleAprobarSeleccionados(1, true, activeTab === "reaprobar" || activeTab === "ficticio" ? 6 : 10);
   };
 
   const handleCancelarRegularizacion = () => {
@@ -4782,7 +4802,7 @@ export default function PagosV2Page() {
                     <span style={{ ...styles.pagoTabBadge, background: selected ? theme.accent : "#CBD5E1" }}>
                       {key === "ficticio"
                         ? ficticioCargado || selected ? ficticioConteo : "–"
-                        : selected && key !== "resumen" && !loadingData && !totalesCargando
+                        : selected && tabTieneCorteFicticio(key) && !loadingData && !totalesCargando
                           ? activeRows.length
                           : tabStats[key]}
                     </span>

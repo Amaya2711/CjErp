@@ -206,6 +206,10 @@ public class LogisticaEquiposController : ControllerBase
             return resultado;
         }, "aprobar u observar las solicitudes");
 
+    [HttpPost("dashboard/resumen")]
+    public Task<IActionResult> ResumenDashboard([FromBody] LogisticaDashboardConsultaDto request, CancellationToken cancellationToken = default)
+        => Ejecutar(async () => await _service.ObtenerDashboardAsync(request, cancellationToken), "obtener el resumen del dashboard");
+
     [HttpPost("campo/consultar")]
     public Task<IActionResult> ConsultarCampo([FromBody] LogisticaCampoConsultaDto request, CancellationToken cancellationToken = default)
         => Ejecutar(async () => await _service.ConsultarCampoAsync(request, cancellationToken), "consultar las lineas de campo");

@@ -235,6 +235,14 @@ public class LogisticaCampoConsultaDto
     public int? IdProyecto { get; set; }
     public string? IdSite { get; set; }
     public int? CorreSite { get; set; }
+    /// <summary>Estado de las lineas a consultar; vacio = 11 (pendientes de campo). La pestana Observadas usa 10.</summary>
+    public int? IdEstado { get; set; }
+    /// <summary>Lista de estados separada por comas (p. ej. "21,7,22"); tiene prioridad sobre IdEstado. Pagina Cierre.</summary>
+    public string? Estados { get; set; }
+    /// <summary>true = como el sistema antiguo: todas las lineas (cualquier estado) de las solicitudes con al menos una linea en Estados.</summary>
+    public bool PorSolicitud { get; set; }
+    /// <summary>true = solo materiales con CodPap que empieza con 10 o 40 (x Foliar).</summary>
+    public bool SoloEquipos { get; set; }
 }
 
 public class LogisticaCampoLineaDto

@@ -1,10 +1,12 @@
 import EtapasPage, { type EtapaTab } from "./equipos/EtapasPage";
 import PorAprobarTab from "./equipos/solicitud/PorAprobarTab";
-import SolicitudConHistorial from "./equipos/solicitud/SolicitudConHistorial";
+import HistorialTab from "./equipos/solicitud/HistorialTab";
+import SolicitudTab from "./equipos/solicitud/SolicitudTab";
 
 /** Página 2: solicitud (regularizaciones), aprobación, despacho, envío, excedentes, recojo y consultas. */
 export const ETAPAS: EtapaTab[] = [
-  { key: "solicitud", label: "Solicitud", content: <SolicitudConHistorial />, conAcciones: true },
+  { key: "solicitud", label: "Solicitud", content: <SolicitudTab />, conAcciones: true },
+  { key: "historial", label: "Historial", content: <HistorialTab /> },
   { key: "aprobar", label: "x Aprobar", content: <PorAprobarTab /> },
   { key: "despachar", label: "x Despachar" },
   { key: "enviar", label: "x Enviar" },

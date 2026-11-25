@@ -14,11 +14,20 @@ export type EtapaTab = {
 type EtapasPageProps = {
   title: string;
   etapas: EtapaTab[];
+  /** Pestaña activa controlada desde fuera (por ejemplo, para saltar a otra pestaña desde un enlace). Sin ella, la página la maneja sola. */
+  activeKey?: string;
+  /** Se avisa al elegir una pestaña con un clic en las etiquetas. */
+  onTabChange?: (key: string) => void;
 };
 
 /** Contenedor de pestañas por etapa del flujo de logística de equipos (equivale a FrmLogistic_v1). */
-export default function EtapasPage({ title, etapas }: EtapasPageProps) {
-  const [tab, setTab] = useState(() => etapas.find((etapa) => etapa.content)?.key ?? etapas[0]?.key ?? "");
+export default function EtapasPage({ title, etapas, activeKey, onTabChange }: EtapasPageProps) {
+  const [tabPropia, setTabPropia] = useState(() => etapas.find((etapa) => etapa.content)?.key ?? etapas[0]?.key ?? "");
+  const tab = activeKey ?? tabPropia;
+  const setTab = (key: string) => {
+    setTabPropia(key);
+    onTabChange?.(key);
+  };
   const activa = etapas.find((etapa) => etapa.key === tab);
   const [slotAcciones, setSlotAcciones] = useState<HTMLElement | null>(null);
 
