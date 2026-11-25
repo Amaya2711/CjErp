@@ -162,6 +162,10 @@ export const empleadosCrudService = {
     return mapItem(response);
   },
 
+  async rechazar(idEmpleado: number): Promise<void> {
+    await httpClient.post(`/mantenimiento/empleados/${idEmpleado}/rechazar`);
+  },
+
   async aprobar(idEmpleado: number): Promise<EmpleadoCrudItem> {
     const response = await httpClient.post<Record<string, unknown>>(`/mantenimiento/empleados/${idEmpleado}/aprobar`);
     return mapItem(response);

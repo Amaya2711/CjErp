@@ -474,6 +474,8 @@ export default function MantenimientoEmpleadosPage() {
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [deleteItem, setDeleteItem] = useState<EmpleadoCrudItem | null>(null);
   const [approveItem, setApproveItem] = useState<EmpleadoCrudItem | null>(null);
+  const [rejectItem, setRejectItem] = useState<EmpleadoCrudItem | null>(null);
+  const [rejectingId, setRejectingId] = useState<number | null>(null);
   const [empresas, setEmpresas] = useState<CrudLookupItem[]>([]);
   const [clientes, setClientes] = useState<CrudLookupItem[]>([]);
   const [areas, setAreas] = useState<CrudLookupItem[]>([]);
@@ -937,6 +939,28 @@ export default function MantenimientoEmpleadosPage() {
     }
   };
 
+  const confirmReject = async () => {
+    if (!rejectItem) {
+      return;
+    }
+
+    const item = rejectItem;
+    setRejectingId(item.idEmpleado);
+    setError("");
+    setSuccess("");
+
+    try {
+      await empleadosCrudService.rechazar(item.idEmpleado);
+      setSuccess(`Empleado ${item.nombreEmpleado} rechazado correctamente.`);
+      setRejectItem(null);
+      await loadEmployees();
+    } catch (err) {
+      setError(getHttpErrorMessage(err, "No se pudo rechazar el empleado."));
+    } finally {
+      setRejectingId(null);
+    }
+  };
+
   const handleApprove = async (item: EmpleadoCrudItem) => {
     if (!canApproveEmpleado(item, activeTab)) {
       return;
@@ -1062,7 +1086,7 @@ export default function MantenimientoEmpleadosPage() {
     {
       dataField: "acciones",
       caption: "Acciones",
-      width: 290,
+      width: 380,
       allowSorting: false,
       allowFiltering: false,
       allowGrouping: false,
@@ -1087,6 +1111,20 @@ export default function MantenimientoEmpleadosPage() {
               title={canApproveEmpleado(item, activeTab) ? "Aprobar empleado" : "Solo disponible para pendientes"}
             >
               {approvingId === item.idEmpleado ? "Aprobando..." : "Aprobar"}
+            </button>
+            <button
+              type="button"
+              style={{
+                ...styles.dangerButton,
+                ...(!canApproveEmpleado(item, activeTab) || rejectingId === item.idEmpleado
+                  ? styles.disabledApproveButton
+                  : {}),
+              }}
+              onClick={() => setRejectItem(item)}
+              disabled={!canApproveEmpleado(item, activeTab) || rejectingId === item.idEmpleado}
+              title={canApproveEmpleado(item, activeTab) ? "Rechazar empleado" : "Solo disponible para pendientes"}
+            >
+              {rejectingId === item.idEmpleado ? "Rechazando..." : "Rechazar"}
             </button>
             <button type="button" style={styles.secondaryButton} onClick={() => openEdit(item)}>
               Editar
@@ -1706,6 +1744,22 @@ export default function MantenimientoEmpleadosPage() {
         cancelLabel="Cancelar"
         onCancel={() => setApproveItem(null)}
         onConfirm={() => void confirmApprove()}
+      />
+
+      <ConfirmDialog
+        open={rejectItem != null}
+        title="Rechazar empleado"
+        message={
+          <>
+            Se rechazará la creación del empleado <strong>{rejectItem?.nombreEmpleado ?? ""}</strong>. El registro dejará
+            de aparecer en el mantenimiento. ¿Desea continuar?
+          </>
+        }
+        confirmLabel={rejectingId === rejectItem?.idEmpleado ? "Procesando..." : "Rechazar"}
+        cancelLabel="Cancelar"
+        destructive
+        onCancel={() => setRejectItem(null)}
+        onConfirm={() => void confirmReject()}
       />
     </AppPage>
   );

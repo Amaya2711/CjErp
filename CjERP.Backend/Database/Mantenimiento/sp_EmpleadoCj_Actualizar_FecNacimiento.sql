@@ -1,9 +1,9 @@
 /*
-  Mantenimiento de empleados: agrega @FecNacimiento a dbo.sp_EmpleadoCj_Actualizar.
-  NO ejecutado contra la BD. Es el SP vigente (pegado el 2026-11-24) con solo dos cambios marcados "FecNacimiento".
-  Requisito: dbo.EmpleadoCj.FecNacimiento ya existe (la lee sp_EmpleadoCj_Ficha).
-  Orden de despliegue: ejecutar este script ANTES de publicar el backend, porque el controlador ya envia @FecNacimiento.
-  sp_EmpleadoCj_Guardar no se toca: el alta del controlador usa SQL directo y graba FecNacimiento con un UPDATE posterior.
+  Mantenimiento de empleados: dbo.sp_EmpleadoCj_Actualizar vigente (2026-11-24).
+  Agrega @FecNacimiento y, para Rechazar, @UsuarioDel / @FechaEliminar / @InicialesEmpleado.
+  Todos los parametros nuevos son opcionales: NULL = conserva el valor (COALESCE).
+  El SP NO recibe IdActivo: el rechazo lo baja con un UPDATE aparte (ver MantenimientoEmpleadosController.Rechazar).
+  Orden de despliegue: ejecutar este script ANTES de publicar el backend.
 */
 USE [JC_Db]
 GO
@@ -41,7 +41,11 @@ ALTER PROCEDURE [dbo].[sp_EmpleadoCj_Actualizar]
     @IdTerceroVacaciones     INT = NULL,
 
     @IdEstado                INT = NULL,
-    @Usuario                 VARCHAR(100)
+    @Usuario                 VARCHAR(100),
+
+    @UsuarioDel              VARCHAR(100) = NULL,
+    @FechaEliminar           DATETIME = NULL,
+    @InicialesEmpleado       VARCHAR(50) = NULL
 )
 AS
 BEGIN
@@ -179,6 +183,24 @@ BEGIN
                 COALESCE(
                     @IdEstado,
                     IdEstado
+                ),
+
+            UsuarioDel =
+                COALESCE(
+                    NULLIF(LTRIM(RTRIM(@UsuarioDel)), ''),
+                    UsuarioDel
+                ),
+
+            FechaEliminar =
+                COALESCE(
+                    @FechaEliminar,
+                    FechaEliminar
+                ),
+
+            InicialesEmpleado =
+                COALESCE(
+                    NULLIF(LTRIM(RTRIM(@InicialesEmpleado)), ''),
+                    InicialesEmpleado
                 )
 
         WHERE IdEmpleado = @IdEmpleado;

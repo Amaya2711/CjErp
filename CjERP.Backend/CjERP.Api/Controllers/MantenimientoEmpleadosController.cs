@@ -324,6 +324,131 @@ public class MantenimientoEmpleadosController : ControllerBase
         });
     }
 
+    /// <summary>
+    /// Rechaza un empleado pendiente: IdEstado = 3, IdActivo = 0, UsuarioDel = usuario logueado,
+    /// FechaEliminar = fecha actual e InicialesEmpleado = 'REC'.
+    /// </summary>
+    [HttpPost("{idEmpleado:int}/rechazar")]
+    public async Task<IActionResult> Rechazar(int idEmpleado, CancellationToken cancellationToken)
+    {
+        if (idEmpleado <= 0)
+        {
+            return BadRequest(new { success = false, message = "IdEmpleado es obligatorio." });
+        }
+
+        var connectionString = GetConnectionString();
+        if (connectionString is null)
+        {
+            return StatusCode(StatusCodes.Status500InternalServerError, new
+            {
+                success = false,
+                message = "La cadena de conexion no esta configurada."
+            });
+        }
+
+        await using var connection = new SqlConnection(connectionString);
+        await connection.OpenAsync(cancellationToken);
+
+        var before = await ObtenerEmpleadoPorIdAsync(connection, idEmpleado, cancellationToken);
+        if (before is null)
+        {
+            return NotFound(new { success = false, message = "No se encontro el empleado solicitado." });
+        }
+
+        if (before.IdEstado != 9)
+        {
+            return BadRequest(new { success = false, message = "Solo se pueden rechazar empleados pendientes." });
+        }
+
+        var usuario = GetCurrentUserName();
+
+        try
+        {
+            await using var transaction = connection.BeginTransaction();
+            try
+            {
+                // Re-valida bajo bloqueo que siga pendiente (otro usuario pudo aprobarlo entre tanto).
+                var estadoActual = await connection.ExecuteScalarAsync<int?>(
+                    new CommandDefinition(
+                        "SELECT IdEstado FROM dbo.EmpleadoCj WITH (UPDLOCK, ROWLOCK) WHERE IdEmpleado = @IdEmpleado;",
+                        new { IdEmpleado = idEmpleado },
+                        transaction: transaction,
+                        commandType: CommandType.Text,
+                        cancellationToken: cancellationToken));
+
+                if (estadoActual != 9)
+                {
+                    await transaction.RollbackAsync(cancellationToken);
+                    return Conflict(new { success = false, message = "El empleado ya no esta pendiente. Actualice la lista." });
+                }
+
+                // sp_EmpleadoCj_Actualizar solo cambia lo que llega distinto de NULL (COALESCE).
+                await connection.ExecuteAsync(
+                    new CommandDefinition(
+                        ActualizarSp,
+                        new
+                        {
+                            IdEmpleado = idEmpleado,
+                            IdEstado = 3,
+                            Usuario = usuario,
+                            UsuarioDel = usuario,
+                            FechaEliminar = DateTime.Now.Date,
+                            InicialesEmpleado = "REC"
+                        },
+                        transaction: transaction,
+                        commandType: CommandType.StoredProcedure,
+                        cancellationToken: cancellationToken));
+
+                // El SP no recibe IdActivo: se baja aparte (el rechazado sale de sp_EmpleadoCj_Ficha).
+                var filas = await connection.ExecuteAsync(
+                    new CommandDefinition(
+                        "UPDATE dbo.EmpleadoCj SET IdActivo = 0 WHERE IdEmpleado = @IdEmpleado AND IdEstado = 3;",
+                        new { IdEmpleado = idEmpleado },
+                        transaction: transaction,
+                        commandType: CommandType.Text,
+                        cancellationToken: cancellationToken));
+
+                if (filas == 0)
+                {
+                    await transaction.RollbackAsync(cancellationToken);
+                    return Conflict(new { success = false, message = "No se pudo rechazar el empleado. Actualice la lista." });
+                }
+
+                await transaction.CommitAsync(cancellationToken);
+            }
+            catch
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                throw;
+            }
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(StatusCodes.Status500InternalServerError, new
+            {
+                success = false,
+                message = $"No se pudo rechazar el empleado. {ex.Message}"
+            });
+        }
+
+        // El rechazado ya no sale en sp_EmpleadoCj_Ficha (IdActivo = 0): la auditoria se arma desde el estado previo.
+        var after = System.Text.Json.JsonSerializer.Deserialize<EmpleadoCrudDto>(
+            System.Text.Json.JsonSerializer.Serialize(before));
+        if (after is not null)
+        {
+            after.IdEstado = 3;
+            after.IdActivo = 0;
+            after.Estado = "RECHAZADO";
+            await RegistrarAuditoriaAsync(BuildUpdateAuditEntries(before, after, usuario), cancellationToken);
+        }
+
+        return Ok(new
+        {
+            success = true,
+            message = "Empleado rechazado correctamente."
+        });
+    }
+
     [HttpDelete("{idEmpleado:int}")]
     public async Task<IActionResult> Eliminar(int idEmpleado, CancellationToken cancellationToken)
     {
