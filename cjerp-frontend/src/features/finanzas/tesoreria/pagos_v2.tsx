@@ -2161,10 +2161,12 @@ export default function PagosV2Page() {
         // para no mostrar valores provisionales (% OC en 20% y luego 60%).
         // % Ficticio filtra por un valor calculado con los totales: sin ellos la grilla queda vacía, así que
         // siempre espera los totales y pinta una sola vez (igual que al reabrirla desde el caché).
+        // Aprobar/Re-aprobar/Hormiga/Observadas solo muestran filas con % Ficticio <= UMBRAL_FICTICIO_ALTO (las demás
+        // van a la pestaña % Ficticio), así que también necesitan los totales antes de pintar.
         const pocasFilas =
           usoLigero &&
           nextRowsByTab[activeTab].length > 0 &&
-          (activeTab === "ficticio" || nextRowsByTab[activeTab].length <= TOTALES_UNA_CARGA_MAX_FILAS);
+          (activeTab !== "resumen" || nextRowsByTab[activeTab].length <= TOTALES_UNA_CARGA_MAX_FILAS);
         if (pocasFilas) {
           const completas = await cargarTotalesDiferidos(activeTab, nextRowsByTab[activeTab], cacheKey, parametros, signal, true);
           if (signal.aborted || cancelled) return;
@@ -2288,7 +2290,11 @@ export default function PagosV2Page() {
         (row) =>
           row.idSolicitante !== 0 &&
           // % Ficticio depende de los totales diferidos: la lista se completa sola cuando llegan.
-          (activeTab !== "ficticio" || calcPctFicticioFila(row) > UMBRAL_FICTICIO_ALTO)
+          // La pestaña % Ficticio muestra los > UMBRAL; las bandejas, solo los <= UMBRAL.
+          (activeTab === "resumen" ||
+            (activeTab === "ficticio"
+              ? calcPctFicticioFila(row) > UMBRAL_FICTICIO_ALTO
+              : calcPctFicticioFila(row) <= UMBRAL_FICTICIO_ALTO))
       ),
     [activeTab, rowsByTab]
   );
@@ -4634,11 +4640,19 @@ export default function PagosV2Page() {
       },
     },
     {
+      // Bandeja a la que pertenece el registro (Aprobar, Re-aprobar, Hormiga, Observadas); agrupa la pestaña % Ficticio.
+      dataField: "bandeja",
+      caption: "Bandeja",
+      width: 110,
+      visible: activeTab === "ficticio",
+      ...(activeTab === "ficticio" ? { groupIndex: 0, sortOrder: "asc" as const } : {}),
+      calculateCellValue: (row) => TAB_THEME[row.estado]?.label ?? "-",
+    },
+    {
       dataField: "estadoNombre",
       caption: "Estado planilla",
       width: 130,
       visible: showEstadoPlanilla,
-      ...(activeTab === "ficticio" ? { groupIndex: 0, sortOrder: "asc" as const } : {}),
       calculateCellValue: getEstadoPlanillaNombre,
       cellRender: (value, row) => {
         const rowTheme = getStateColor(row.estado);
@@ -4766,7 +4780,11 @@ export default function PagosV2Page() {
                     {icon}
                     {label}
                     <span style={{ ...styles.pagoTabBadge, background: selected ? theme.accent : "#CBD5E1" }}>
-                      {key === "ficticio" ? (ficticioCargado || selected ? ficticioConteo : "–") : tabStats[key]}
+                      {key === "ficticio"
+                        ? ficticioCargado || selected ? ficticioConteo : "–"
+                        : selected && key !== "resumen" && !loadingData && !totalesCargando
+                          ? activeRows.length
+                          : tabStats[key]}
                     </span>
                   </button>
                 );
