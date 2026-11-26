@@ -2,6 +2,8 @@ export type AuthUser = {
   token: string;
   expiration?: string;
   sessionId?: string;
+  /** Minutos de inactividad permitidos para este usuario (lo define el backend). */
+  idleTimeoutMinutes?: number;
   nombre?: string;
   nombreEmpleado?: string;
   empleado?: string;

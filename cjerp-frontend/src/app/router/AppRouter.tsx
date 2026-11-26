@@ -290,10 +290,6 @@ export default function AppRouter() {
             <Route path="/reportes/rptasistencia" element={<RptAsistenciaPage />} />
             <Route path="/reportes/rptasistenciaempleado" element={<RptAsistenciaEmpleadoPage />} />
 
-            <Route
-              path="/logistica/gestionequipos"
-              element={<Navigate to="/logistica/gestionequipos/cruce" replace />}
-            />
             <Route path="/logistica/gestionequipos/cruce" element={<CrucePage />} />
             <Route
               path="/logistica/gestionequipos/desmontado"

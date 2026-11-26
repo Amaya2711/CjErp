@@ -17,6 +17,7 @@ export interface LoginResponse {
   codVal?: number | null;
   cuadrilla?: number | null;
   expiration?: string;
+  idleTimeoutMinutes?: number | null;
   IdPerfil?: number | null;
   IdRol?: number | null;
 }

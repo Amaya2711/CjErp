@@ -12,10 +12,12 @@ namespace CjERP.Infrastructure.Services
     public class JwtService : IJwtService
     {
         private readonly JwtSettings _jwtSettings;
+        private readonly SessionSettings _sessionSettings;
 
-        public JwtService(IOptions<JwtSettings> jwtSettings)
+        public JwtService(IOptions<JwtSettings> jwtSettings, IOptions<SessionSettings>? sessionSettings = null)
         {
             _jwtSettings = jwtSettings.Value;
+            _sessionSettings = sessionSettings?.Value ?? new SessionSettings();
         }
 
         public string RenewToken(ClaimsPrincipal principal)
@@ -71,12 +73,15 @@ namespace CjERP.Infrastructure.Services
                 key,
                 SecurityAlgorithms.HmacSha256);
 
-            var expiration = DateTime.UtcNow.AddMinutes(_jwtSettings.DurationInMinutes);
+            var claimList = claims.ToList();
+            var userId = claimList.FirstOrDefault(c => c.Type == "IdUsuario")?.Value;
+            var expiration = DateTime.UtcNow.AddMinutes(
+                _sessionSettings.GetTokenDurationMinutes(userId, _jwtSettings.DurationInMinutes));
 
             var token = new JwtSecurityToken(
                 issuer: _jwtSettings.Issuer,
                 audience: _jwtSettings.Audience,
-                claims: claims,
+                claims: claimList,
                 expires: expiration,
                 signingCredentials: creds);
 

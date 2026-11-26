@@ -8,14 +8,15 @@ namespace CjERP.Infrastructure.Services;
 public class ActiveUserSessionService : IActiveUserSessionService
 {
     private readonly ConcurrentDictionary<string, ConcurrentDictionary<string, SessionState>> _activeSessions = new(StringComparer.OrdinalIgnoreCase);
-    private readonly TimeSpan _idleTimeout;
+    private readonly SessionSettings _settings;
     private static readonly TimeSpan RefreshWriteThreshold = TimeSpan.FromMinutes(1);
 
     public ActiveUserSessionService(IOptions<SessionSettings> sessionSettings)
     {
-        var minutes = Math.Max(1, sessionSettings.Value.IdleTimeoutMinutes);
-        _idleTimeout = TimeSpan.FromMinutes(minutes);
+        _settings = sessionSettings.Value;
     }
+
+    private TimeSpan IdleTimeoutFor(string userId) => TimeSpan.FromMinutes(_settings.GetIdleTimeoutMinutes(userId));
 
     public void SetActiveSession(string userId, string sessionId)
     {
@@ -43,7 +44,7 @@ public class ActiveUserSessionService : IActiveUserSessionService
         }
 
         var utcNow = DateTimeOffset.UtcNow;
-        if (utcNow - activeSession.LastActivityUtc > _idleTimeout)
+        if (utcNow - activeSession.LastActivityUtc > IdleTimeoutFor(trimmedUserId))
         {
             sessions.TryRemove(sessionId.Trim(), out _);
             RemoveUserIfNoSessions(trimmedUserId, sessions);
@@ -88,9 +89,10 @@ public class ActiveUserSessionService : IActiveUserSessionService
 
         foreach (var entry in _activeSessions)
         {
+            var idleTimeout = IdleTimeoutFor(entry.Key);
             foreach (var session in entry.Value)
             {
-                if (utcNow - session.Value.LastActivityUtc > _idleTimeout && entry.Value.TryRemove(session.Key, out _)) removed++;
+                if (utcNow - session.Value.LastActivityUtc > idleTimeout &&entry.Value.TryRemove(session.Key, out _)) removed++;
             }
             RemoveUserIfNoSessions(entry.Key, entry.Value);
         }

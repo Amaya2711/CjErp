@@ -241,12 +241,17 @@ export default function DashboardPage() {
         }
 
         setMenuCompleto(menu);
+        // Las cabeceras de menú (ítems con hijos) no son accesos directos: solo las opciones finales.
+        const idsCabecera = new Set(
+          menu.filter((m) => m.idMenuPadre != null).map((m) => m.idMenuPadre as number)
+        );
         setAccesosDirectos(
           menu.filter(
             (m) =>
               Number(m.acceso) === 1 &&
               getMenuRoute(m) !== "" &&
-              getMenuRoute(m) !== CLAUDEIA_RUTA
+              getMenuRoute(m) !== CLAUDEIA_RUTA &&
+              !idsCabecera.has(m.idMenu)
           )
         );
       } catch (_error: unknown) {

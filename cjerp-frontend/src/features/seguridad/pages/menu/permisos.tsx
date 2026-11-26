@@ -94,6 +94,7 @@ export default function SeguridadPermisosAccionesPage() {
   const [permisos, setPermisos] = useState<PermisoAccionDto[]>([]);
 
   const [filtroRuta, setFiltroRuta] = useState("");
+  const [paginaBusqueda, setPaginaBusqueda] = useState<string | null>(null);
   const [filtroSubjectType, setFiltroSubjectType] = useState<SubjectType>(
     authUser?.idrol ? "rol" : "empleado"
   );
@@ -592,14 +593,32 @@ export default function SeguridadPermisosAccionesPage() {
         }
       >
         <ToolbarFiltro style={{ width: "100%", marginBottom: 12 }}>
-          <SelectBase
+          <InputBase
             label="Pagina"
-            value={filtroRuta}
-            onChange={(event) => setFiltroRuta(event.target.value)}
-            options={menuOptions}
-            placeholder="Seleccione una pagina"
+            value={
+              paginaBusqueda ??
+              menuOptions.find((option) => option.value === filtroRuta)?.label ??
+              ""
+            }
+            onChange={(event) => {
+              const value = event.target.value;
+              const selected = menuOptions.find(
+                (option) => option.label.toLowerCase() === value.trim().toLowerCase()
+              );
+              setPaginaBusqueda(value);
+              setFiltroRuta(selected ? String(selected.value) : "");
+            }}
+            onBlur={() => setPaginaBusqueda(null)}
+            list="paginas-permisos-options"
+            autoComplete="off"
+            placeholder="Escriba para buscar una pagina"
             style={{ flex: "1 1 320px" }}
           />
+          <datalist id="paginas-permisos-options">
+            {menuOptions.map((option) => (
+              <option key={String(option.value)} value={option.label} />
+            ))}
+          </datalist>
 
           <SelectBase
             label="Sujeto"

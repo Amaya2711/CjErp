@@ -31,6 +31,12 @@ const THROTTLED_ACTIVITY_EVENTS = new Set<string>(["mousemove", "scroll"]);
 const ACTIVITY_THROTTLE_MS = 1000;
 
 function getIdleTimeoutMs() {
+  // Si el backend definió un tiempo propio para este usuario, manda sobre el general.
+  const userMinutes = Number(getAuthUser()?.idleTimeoutMinutes);
+  if (Number.isFinite(userMinutes) && userMinutes > 0) {
+    return userMinutes * 60 * 1000;
+  }
+
   const configuredMinutes = Number(import.meta.env.VITE_IDLE_TIMEOUT_MINUTES ?? DEFAULT_IDLE_TIMEOUT_MINUTES);
   const safeMinutes = Number.isFinite(configuredMinutes) && configuredMinutes > 0
     ? configuredMinutes
@@ -53,8 +59,6 @@ export default function SessionManager() {
   }, [location.pathname]);
 
   useEffect(() => {
-    const idleTimeoutMs = getIdleTimeoutMs();
-
     const clearTimer = () => {
       if (timerRef.current !== null) {
         window.clearTimeout(timerRef.current);
@@ -86,7 +90,7 @@ export default function SessionManager() {
 
       const lastActivity = getLastAuthActivity() ?? Date.now();
       const tokenExpiration = getJwtExpiration(authUser.token)?.getTime() ?? Number.MAX_SAFE_INTEGER;
-      const idleDeadline = lastActivity + idleTimeoutMs;
+      const idleDeadline = lastActivity + getIdleTimeoutMs();
       const nextDeadline = Math.min(idleDeadline, tokenExpiration);
       const remainingMs = Math.max(0, nextDeadline - Date.now());
 

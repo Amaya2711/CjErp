@@ -17,13 +17,16 @@ namespace CjERP.Api.Controllers
         private readonly IJwtService _jwtService;
         private readonly IActiveUserSessionService _activeUserSessionService;
         private readonly JwtSettings _jwtSettings;
+        private readonly SessionSettings _sessionSettings;
 
         public AuthController(
             IAuthService authService,
             IJwtService jwtService,
             IActiveUserSessionService activeUserSessionService,
-            IOptions<JwtSettings> jwtSettings)
+            IOptions<JwtSettings> jwtSettings,
+            IOptions<SessionSettings> sessionSettings)
         {
+            _sessionSettings = sessionSettings.Value;
             _authService = authService;
             _jwtService = jwtService;
             _activeUserSessionService = activeUserSessionService;
@@ -54,7 +57,9 @@ namespace CjERP.Api.Controllers
             var token = _jwtService.GenerateToken(usuario, sessionId);
             usuario.Token = token;
             usuario.SessionId = sessionId;
-            usuario.Expiration = DateTime.UtcNow.AddMinutes(_jwtSettings.DurationInMinutes);
+            usuario.Expiration = DateTime.UtcNow.AddMinutes(
+                _sessionSettings.GetTokenDurationMinutes(usuario.IdUsuario, _jwtSettings.DurationInMinutes));
+            usuario.IdleTimeoutMinutes = _sessionSettings.GetIdleTimeoutMinutes(usuario.IdUsuario);
 
             return Ok(new
             {
@@ -83,7 +88,8 @@ namespace CjERP.Api.Controllers
                 {
                     token,
                     sessionId = User.FindFirstValue("SessionId"),
-                    expiration = DateTime.UtcNow.AddMinutes(_jwtSettings.DurationInMinutes)
+                    expiration = DateTime.UtcNow.AddMinutes(
+                        _sessionSettings.GetTokenDurationMinutes(User.FindFirstValue("IdUsuario"), _jwtSettings.DurationInMinutes))
                 }
             });
         }

@@ -46,6 +46,7 @@ export default function LoginPage() {
         token: response.token,
         expiration: response.expiration,
         sessionId: response.sessionId ?? "",
+        idleTimeoutMinutes: response.idleTimeoutMinutes ?? undefined,
         usuario: response.idUsuario ?? "",
         nombre: response.nombreEmpleado ?? "",
         correo: response.correo ?? "",
