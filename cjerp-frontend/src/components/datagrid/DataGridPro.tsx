@@ -64,6 +64,8 @@ export type DataGridProProps<T extends object> = {
     onCellChanged?: (event: CellChangedEvent<T>) => void;
     /** Inicia la edición con un solo clic (por defecto: doble clic). */
     editOnClick?: boolean;
+    /** Permite bloquear la edición de una celda concreta según su fila (por defecto todas las celdas editables lo son). */
+    canEditCell?: (row: T, field: string) => boolean;
   };
   summary?: { totalItems?: GridSummaryItem[]; groupItems?: GridSummaryItem[] };
   masterDetail?: (row: T) => React.ReactNode;
@@ -371,11 +373,13 @@ export default function DataGridPro<T extends object>({
   );
 
   // ---------- Pipeline de datos: filtro → búsqueda → orden → agrupación ----------
-  const filtered = useMemo(() => {
+  // Filas que cumplen todos los filtros; `exceptHeaderField` omite el filtro de encabezado de esa
+  // columna (para que su lista de valores se acote con los demás filtros, en cascada).
+  const applyFilters = useCallback((exceptHeaderField?: string) => {
     const active = Object.entries(filters).filter(([, v]) => v.trim() !== "");
-    const headerActive = Object.entries(headerFilters).map(
-      ([field, values]) => [field, new Set(values)] as const
-    );
+    const headerActive = Object.entries(headerFilters)
+      .filter(([field]) => field !== exceptHeaderField)
+      .map(([field, values]) => [field, new Set(values)] as const);
     const query = normalizeText(search.trim());
     const searchCols = orderedFields
       .filter((f) => !hidden.has(f))
@@ -398,6 +402,8 @@ export default function DataGridPro<T extends object>({
       return true;
     });
   }, [dataSource, filters, headerFilters, search, orderedFields, hidden, colMap]);
+
+  const filtered = useMemo(() => applyFilters(), [applyFilters]);
 
   const sorted = useMemo(() => {
     if (sort.length === 0) return filtered;
@@ -1110,10 +1116,10 @@ export default function DataGridPro<T extends object>({
                             ...c.cellStyle?.(getCellValue(row, c, c.dataField), row),
                           }}
                           onClick={() => {
-                            if (editing?.editOnClick && canEdit(c)) setEditingCell({ key, field: c.dataField });
+                            if (editing?.editOnClick && canEdit(c) && (editing.canEditCell?.(row, c.dataField) ?? true)) setEditingCell({ key, field: c.dataField });
                           }}
                           onDoubleClick={() => {
-                            if (canEdit(c)) setEditingCell({ key, field: c.dataField });
+                            if (canEdit(c) && (editing?.canEditCell?.(row, c.dataField) ?? true)) setEditingCell({ key, field: c.dataField });
                           }}
                         >
                           {renderCell(row, c)}
@@ -1156,7 +1162,7 @@ export default function DataGridPro<T extends object>({
       {headerFilterOpen && colMap.get(headerFilterOpen.field) ? (
         <HeaderFilterPopover
           col={colMap.get(headerFilterOpen.field) as GridColumn<T>}
-          rows={dataSource}
+          rows={applyFilters(headerFilterOpen.field)}
           position={headerFilterOpen}
           selected={headerFilters[headerFilterOpen.field]}
           onClose={() => setHeaderFilterOpen(null)}
@@ -1363,7 +1369,7 @@ function HeaderFilterPopover<T extends object>({
           <button
             type="button"
             style={{ ...styles.toolButton, background: "#2563EB", color: "#FFFFFF", borderColor: "#2563EB" }}
-            onClick={() => onApply(checked.size >= options.length ? null : [...checked])}
+            onClick={() => onApply(options.every((o) => checked.has(o.text)) ? null : [...checked])}
           >
             Aceptar
           </button>

@@ -44,11 +44,22 @@ BEGIN
   BEGIN TRY
     BEGIN TRANSACTION;
 
+    -- Valores anteriores y nuevos (OUTPUT) para la auditoria de los UPDATE en dbo.AuditoriaCambios (script 24).
+    IF OBJECT_ID(N'dbo.sp_Logistica_Auditar', N'P') IS NULL
+      THROW 51340, 'Falta dbo.sp_Logistica_Auditar (ejecute el script 24).', 1;
+    DECLARE @o TABLE (Obs0 nvarchar(500), Obs1 nvarchar(500), Ser0 nvarchar(100), Ser1 nvarchar(100),
+                      Gui0 nvarchar(50), Gui1 nvarchar(50), Can0 decimal(18,4), Can1 decimal(18,4));
+
     UPDATE b
        SET b.Observacion = CASE WHEN EXISTS (SELECT 1 FROM @c WHERE Campo = N'observacion') THEN @Observacion ELSE b.Observacion END,
            b.Serie       = CASE WHEN EXISTS (SELECT 1 FROM @c WHERE Campo = N'serie')       THEN @Serie       ELSE b.Serie END,
            b.NroGuia     = CASE WHEN EXISTS (SELECT 1 FROM @c WHERE Campo = N'nroguia')     THEN @NroGuia     ELSE b.NroGuia END,
            b.CantSap     = CASE WHEN EXISTS (SELECT 1 FROM @c WHERE Campo = N'cantsap')     THEN @CantSap     ELSE b.CantSap END
+    OUTPUT CAST(deleted.Observacion AS nvarchar(500)), CAST(inserted.Observacion AS nvarchar(500)),
+           CAST(deleted.Serie AS nvarchar(100)), CAST(inserted.Serie AS nvarchar(100)),
+           CAST(deleted.NroGuia AS nvarchar(50)), CAST(inserted.NroGuia AS nvarchar(50)),
+           CAST(deleted.CantSap AS decimal(18,4)), CAST(inserted.CantSap AS decimal(18,4))
+      INTO @o
     FROM dbo.DetSolicitud b
     WHERE CAST(b.NroSolicitud AS nvarchar(50)) = @NroSolicitud
       AND CAST(b.Posicion AS nvarchar(20)) = @Posicion
@@ -57,6 +68,20 @@ BEGIN
 
     IF @@ROWCOUNT = 0
       THROW 51310, 'La linea ya no esta pendiente de campo. Vuelva a consultar.', 1;
+
+    -- Auditoria de los campos editados (solo los de @Campos). Se vacia #Aud antes del flujo de estado, que usa la suya.
+    CREATE TABLE #Aud (Entidad nvarchar(100), IdRegistro nvarchar(100), Seccion nvarchar(100) NULL, Campo nvarchar(100),
+                       ValorAnterior nvarchar(max) NULL, ValorNuevo nvarchar(max) NULL);
+    INSERT INTO #Aud (Entidad, IdRegistro, Seccion, Campo, ValorAnterior, ValorNuevo)
+    SELECT N'DetSolicitud', CONCAT(@NroSolicitud, N'-', @Posicion), N'CAMPO', v.Campo, v.Ant, v.Nue
+    FROM @o o
+    CROSS APPLY (VALUES (N'observacion', N'Observacion', o.Obs0, o.Obs1),
+                        (N'serie',       N'Serie',       o.Ser0, o.Ser1),
+                        (N'nroguia',     N'NroGuia',     o.Gui0, o.Gui1),
+                        (N'cantsap',     N'CantSap',     CONVERT(nvarchar(50), o.Can0), CONVERT(nvarchar(50), o.Can1))) v (Clave, Campo, Ant, Nue)
+    WHERE EXISTS (SELECT 1 FROM @c WHERE Campo = v.Clave);
+    EXEC dbo.sp_Logistica_Auditar @Usuario = @Usuario;
+    DROP TABLE #Aud;
 
     IF EXISTS (SELECT 1 FROM @c WHERE Campo = N'estado')
     BEGIN

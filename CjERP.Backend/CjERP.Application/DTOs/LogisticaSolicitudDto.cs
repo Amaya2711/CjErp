@@ -260,6 +260,8 @@ public class LogisticaCampoLineaDto
     public string? RutaImagen { get; set; }
     public string? ImagenEnvio { get; set; }
     public string? NroGuia { get; set; }
+    /// <summary>DetSolicitud.MontoEnvio (numeric(18,2)); la devuelve sp_Logistica_Campo_Consultar.</summary>
+    public decimal? MontoEnvio { get; set; }
     public int IdEstado { get; set; }
     public string? NomEstado { get; set; }
     public int? IdCliente { get; set; }
@@ -300,6 +302,31 @@ public class LogisticaCampoActualizarDto
     /// <summary>14 (conforme / x cruzar) o 10 (observada); ejecuta el flujo completo de sp_Logistica_Campo_Grabar.</summary>
     public int? IdEstado { get; set; }
     public decimal? Cantidad { get; set; }
+}
+
+/// <summary>Cambio de estado de UNA linea desde la pagina Cierre (x Cruzar / x Cerrar / x Foliar), con stock y kardex.</summary>
+public class LogisticaCierreCambiarEstadoDto
+{
+    public string NroSolicitud { get; set; } = string.Empty;
+    public string Posicion { get; set; } = string.Empty;
+    public string? Correlativo { get; set; }
+    /// <summary>Estado elegido: x Cruzar 21/17/10; x Cerrar 16/20/17/10; x Foliar 20/10.</summary>
+    public int IdEstado { get; set; }
+    /// <summary>Cantidad conforme (0..cantidad de la linea). Si es menor, la diferencia pasa a una linea nueva en estado 17.</summary>
+    public decimal? Cantidad { get; set; }
+    public string? Observacion { get; set; }
+}
+
+/// <summary>Edicion directa de la serie o la observacion de UNA linea desde la pagina Cierre (cualquier estado).</summary>
+public class LogisticaCierreActualizarLineaDto
+{
+    public string NroSolicitud { get; set; } = string.Empty;
+    public string Posicion { get; set; } = string.Empty;
+    public string? Correlativo { get; set; }
+    /// <summary>"serie" u "observacion".</summary>
+    public string Campo { get; set; } = string.Empty;
+    /// <summary>Nuevo valor; vacio = limpiar el campo.</summary>
+    public string? Valor { get; set; }
 }
 
 public class LogisticaCampoGrabarDto

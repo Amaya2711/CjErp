@@ -232,6 +232,8 @@ export default function EstadoTab({
           }}
           editing={{
             allowUpdating: true,
+            // Registro rechazado (estado 6): no se puede cambiar su estado.
+            canEditCell: (fila, field) => !(field === "estadoNuevo" && fila.idEstado === 6),
             onCellChanged: ({ key, field, value }) => {
               if (field !== "estadoNuevo") return;
               setFilas((actuales) =>

@@ -3,7 +3,7 @@ import ConfirmDialog from "../../../../../components/base/ConfirmDialog";
 import DataGridPro from "../../../../../components/datagrid/DataGridPro";
 import type { GridColumn } from "../../../../../components/datagrid/types";
 import { FiltroOperativoLookup } from "../../../../../components/lookups/FiltroOperativoLookup";
-import { actualizarLineaCampo, consultarCampo, grabarCampo } from "../../../../../api/logisticaEquiposService";
+import { actualizarLineaCampo, actualizarLineaCierre, cambiarEstadoCierre, consultarCampo, grabarCampo } from "../../../../../api/logisticaEquiposService";
 import type { FiltroOperativoValue } from "../../../../../models/filtroOperativo";
 import type { CampoLinea } from "../../../../../models/logisticaEquipos";
 import { getHttpErrorMessage } from "../../../../../utils/httpError";
@@ -21,8 +21,42 @@ type FilaCampo = CampoLinea & {
   obs: string;
 };
 
+/** Estado 6 (rechazado): la línea no admite cambio de estado. */
+const ESTADO_RECHAZADO = 6;
+
 /** Estados de ESTADO_LOG que muestra esta pestaña. */
 const ESTADOS_CAMPO = [10, 14, 19];
+
+/**
+ * Fondo de cada línea según su IdEstado (ESTADO_LOG): un color pastel distinto por estado.
+ * 14 (x Cruzar) va en blanco; un estado que no esté aquí se deja sin color.
+ */
+const FONDO_POR_ESTADO: Record<number, string> = {
+  0: "#F3F4F6", // gris claro
+  1: "#E0F2FE", // celeste
+  2: "#DCFCE7", // verde
+  3: "#FEF9C3", // amarillo
+  4: "#ECFCCB", // lima
+  5: "#CCFBF1", // turquesa
+  6: "#FFE4E9", // rosado leve
+  7: "#FFC9B3", // salmón
+  8: "#FFEDD5", // durazno
+  9: "#EDE9FE", // lavanda
+  10: "#FDE68A", // ámbar
+  11: "#DBEAFE", // azul claro
+  14: "#FFFFFF", // blanco (x Cruzar)
+  15: "#FCE7F3", // rosa claro
+  16: "#E0E7FF", // índigo claro
+  17: "#FEF3C7", // arena
+  19: "#D1FAE5", // menta
+  20: "#BBF7D0", // verde suave
+  21: "#FBCFE8", // fucsia claro
+  22: "#E9D5FF", // violeta claro
+  23: "#BAE6FD", // azul cielo
+  24: "#FDBA74", // naranja claro
+  25: "#C7D2FE", // azul lavanda
+  28: "#A7F3D0", // verde agua
+};
 
 const hoyIso = () => new Date().toISOString().slice(0, 10);
 const fechaCorta = (valor: unknown) => String(valor ?? "").slice(0, 10);
@@ -49,6 +83,8 @@ export default function CampoTab({
   estados,
   porSolicitud,
   soloEquipos,
+  cambioEstado,
+  mostrarMontoEnvio = false,
   etapa,
 }: {
   modo?: ModoCampoTab;
@@ -59,6 +95,22 @@ export default function CampoTab({
   porSolicitud?: boolean;
   /** Solo materiales con código 10 o 40 (x Foliar). */
   soloEquipos?: boolean;
+  /**
+   * Página Cierre: habilita la columna Estado (y Cant. conforme) para cambiar el estado de una línea.
+   * `origen` = estados desde los que se puede cambiar (el resto de líneas de la solicitud solo se ven); `destino` = estados a elegir;
+   * `porDefecto` = estado que se aplica a las líneas marcadas a las que no se les eligió ninguno (botón Grabar estado).
+   */
+  cambioEstado?: {
+    origen: number[];
+    destino: number[];
+    /** Estado por defecto de una línea según su código de material. */
+    porDefecto: (codPap: string | null | undefined) => number;
+    /** Estados que puede devolver `porDefecto` (para mostrar sus nombres) y una nota que explica cuándo aplica cada uno. */
+    porDefectoPosibles: number[];
+    notaPorDefecto?: string;
+  };
+  /** Muestra la columna "Monto envío" (DetSolicitud.MontoEnvio): x Cerrar y x Foliar. */
+  mostrarMontoEnvio?: boolean;
   /** Nombre de la etapa (p. ej. "x Cruzar") para los textos de la pestaña cuando se usa `estados`. */
   etapa?: string;
 }) {
@@ -66,18 +118,27 @@ export default function CampoTab({
   const esReporte = modo === "reporte";
   const porEstados = !!estados;
   const soloConsulta = modo !== "campo" || porEstados;
+  // Página Cierre con cambio de estado: solo Estado, Cant. conforme, Observación y Serie son editables (serie y observación se guardan al instante en DetSolicitud).
+  const editaCierre = !!cambioEstado;
   // 10 = observadas; -1 = todos los estados (reporte); vacío = 11 (x Campo).
   const idEstadoConsulta = soloObservadas ? 10 : esReporte ? -1 : undefined;
   // Estados: sp_Constante_ListarPorCampo @Campo='ESTADO_LOG', solo los códigos de esta pestaña.
   const [estadosCampo, setEstadosCampo] = useState<{ value: number; label: string }[]>([]);
+  // Nombre (ValorFin) de cualquier estado, para los mensajes (p. ej. el estado por defecto, que no está en la lista a elegir).
+  const [nombresEstado, setNombresEstado] = useState<Record<number, string>>({});
   useEffect(() => {
     let cancelled = false;
     getConstantesPorCampo("ESTADO_LOG")
       .then((data) => {
         if (cancelled) return;
-        const opciones = data
-          .map((c) => ({ value: Number(c.correlativo ?? c.codigo), label: (c.valorIni ?? c.descripcion ?? "").trim() }))
-          .filter((o) => ESTADOS_CAMPO.includes(o.value))
+        const todos = data.map((c) => ({
+          value: Number(c.correlativo ?? c.codigo),
+          // Página Cierre: el nombre es Constante.ValorFin (el de la columna "Est. actual"); se muestra como "código - ValorFin".
+          label: ((cambioEstado ? c.valorFin || c.valorIni : c.valorIni) ?? c.descripcion ?? "").trim(),
+        }));
+        setNombresEstado(Object.fromEntries(todos.map((o) => [o.value, o.label])));
+        const opciones = todos
+          .filter((o) => (cambioEstado ? cambioEstado.destino.includes(o.value) : ESTADOS_CAMPO.includes(o.value)))
           .map((o) => ({ ...o, label: `${o.value} - ${o.label}` }))
           .sort((a, b) => a.value - b.value);
         setEstadosCampo(opciones);
@@ -180,7 +241,68 @@ export default function CampoTab({
   const marcadas = useMemo(() => filas.filter((f) => claves.has(f.clave)), [filas, claves]);
   const esObservada = (f: FilaCampo) => f.estadoNuevo === 10 || f.cantConforme !== f.cantSap;
 
+  // Página Cierre: líneas marcadas que se pueden procesar (en el estado de la etapa y no rechazadas); las demás solo se ven.
+  const elegiblesCierre = useMemo(
+    () => (cambioEstado ? marcadas.filter((f) => cambioEstado.origen.includes(f.idEstado) && f.idEstado !== ESTADO_RECHAZADO) : []),
+    [marcadas, cambioEstado],
+  );
+  const etiquetaDefecto = cambioEstado
+    ? cambioEstado.porDefectoPosibles.map((e) => `${e}${nombresEstado[e] ? ` - ${nombresEstado[e]}` : ""}`).join(" o ") +
+      (cambioEstado.notaPorDefecto ? ` (${cambioEstado.notaPorDefecto})` : "")
+    : "";
+
+  const pedirConfirmacionCierre = () => {
+    if (!cambioEstado) return;
+    setError("");
+    setMensaje("");
+    if (marcadas.length === 0) return setError("No existen registros seleccionados.");
+    if (elegiblesCierre.length === 0) {
+      return setError(`Ningún registro seleccionado está en estado ${cambioEstado.origen.join(", ")}; los demás solo se muestran.`);
+    }
+    const invalida = elegiblesCierre.find((f) => !Number.isFinite(f.cantConforme) || f.cantConforme < 0 || f.cantConforme > f.cantSap);
+    if (invalida) return setError(`Solicitud ${invalida.nroSolicitud}, posición ${invalida.posicion}: la cantidad conforme debe estar entre 0 y ${invalida.cantSap}.`);
+    const sinObs = elegiblesCierre.find((f) => {
+      const estado = f.estadoNuevo ?? cambioEstado.porDefecto(f.codPap);
+      return (estado === 10 || estado === 17 || f.cantConforme !== f.cantSap) && !f.obs.trim();
+    });
+    if (sinObs) {
+      return setError(
+        `Solicitud ${sinObs.nroSolicitud}, posición ${sinObs.posicion}: la observación es obligatoria para observar, dejar excedente o con cantidad conforme menor.`,
+      );
+    }
+    setConfirmar(true);
+  };
+
+  /** Cambia el estado de cada línea elegible: el elegido en la columna Estado o, si está vacío, el estado por defecto de la pestaña. */
+  const ejecutarCierre = async () => {
+    if (!cambioEstado) return;
+    setConfirmar(false);
+    setGuardando(true);
+    let hechas = 0;
+    try {
+      for (const f of elegiblesCierre) {
+        await cambiarEstadoCierre({
+          nroSolicitud: f.nroSolicitud,
+          posicion: f.posicion,
+          correlativo: f.correlativo,
+          idEstado: f.estadoNuevo ?? cambioEstado.porDefecto(f.codPap),
+          cantidad: f.cantConforme,
+          observacion: f.obs.trim() || undefined,
+        });
+        hechas += 1;
+      }
+      setMensaje(`Datos actualizados: ${hechas} registro(s).`);
+    } catch (err) {
+      setError(`${getHttpErrorMessage(err, "No se pudo cambiar el estado.")} Se procesaron ${hechas} de ${elegiblesCierre.length} registro(s).`);
+    } finally {
+      setSeleccion([]);
+      setGuardando(false);
+      await buscar();
+    }
+  };
+
   const pedirConfirmacion = () => {
+    if (cambioEstado) return pedirConfirmacionCierre();
     setError("");
     setMensaje("");
     if (marcadas.length === 0) return setError("No existen registros seleccionados.");
@@ -216,6 +338,32 @@ export default function CampoTab({
       return setError(`La cantidad conforme debe estar entre 0 y ${fila.cantSap}.`);
     }
     setGuardando(true);
+    if (cambioEstado) {
+      // Página Cierre: cambia estado + stock + kardex; si la cantidad conforme es menor, la diferencia queda en una línea nueva (17).
+      try {
+        await cambiarEstadoCierre({
+          nroSolicitud: fila.nroSolicitud,
+          posicion: fila.posicion,
+          correlativo: fila.correlativo,
+          idEstado,
+          cantidad: fila.cantConforme,
+          observacion: obs || undefined,
+        });
+        const dif = fila.cantSap - fila.cantConforme;
+        setMensaje(
+          `Solicitud ${fila.nroSolicitud}, posición ${fila.posicion}: ${estadosCampo.find((e) => e.value === idEstado)?.label ?? idEstado}.` +
+            (dif > 0 && fila.cantConforme > 0 ? ` La diferencia (${dif}) quedó como excedente (estado 17).` : ""),
+        );
+        setSeleccion([]);
+        await buscar();
+      } catch (err) {
+        actualizar(fila.clave, { estadoNuevo: null });
+        setError(getHttpErrorMessage(err, "No se pudo cambiar el estado."));
+      } finally {
+        setGuardando(false);
+      }
+      return;
+    }
     try {
       await actualizarLineaCampo({
         nroSolicitud: fila.nroSolicitud,
@@ -242,7 +390,7 @@ export default function CampoTab({
    * se actualizan en la línea; el estado ejecuta el flujo completo de conformidad (stock, kardex, cabecera) y la
    * línea sale de la bandeja (pasa a 14 x cruzar o 10 observada).
    */
-  const guardarCelda = async (clave: string, campo: "observacion" | "serie" | "nroguia" | "cantsap" | "estado", valor: string | number | null) => {
+  const guardarCelda = async (clave: string, campo: "observacion" | "serie" | "nroguia" | "cantsap" | "estado" | "montoenvio", valor: string | number | null) => {
     const fila = filas.find((f) => f.clave === clave);
     if (!fila) return;
     setError("");
@@ -251,7 +399,23 @@ export default function CampoTab({
 
     if (campo === "estado") {
       if (valor === null) return actualizar(clave, { estadoNuevo: null });
+      if (fila.idEstado === ESTADO_RECHAZADO) {
+        actualizar(clave, { estadoNuevo: null });
+        return setError(`Solicitud ${fila.nroSolicitud}, posición ${fila.posicion}: la línea está RECHAZADA (estado 6); no se puede cambiar su estado.`);
+      }
       const idEstado = Number(valor);
+      if (cambioEstado && !cambioEstado.origen.includes(fila.idEstado)) {
+        // Las demás líneas de la solicitud solo se ven; el estado se cambia en las líneas de esta etapa.
+        actualizar(clave, { estadoNuevo: null });
+        return setError(
+          `Solicitud ${fila.nroSolicitud}, posición ${fila.posicion}: está en ${fila.nomEstado ?? fila.idEstado}; en ${etapa ?? "esta pestaña"} solo se cambian las líneas en estado ${cambioEstado.origen.join(", ")}.`,
+        );
+      }
+      if (cambioEstado) {
+        // Página Cierre: el estado elegido queda pendiente (la fila se marca sola); se aplica con "Grabar estado".
+        actualizar(clave, { estadoNuevo: idEstado });
+        return;
+      }
       const observada = idEstado === 10 || fila.cantConforme !== fila.cantSap;
       if (observada && !fila.obs.trim()) {
         // OBSERVADA exige detalle: se pide en un popup y, al aceptar, se graba junto con el estado.
@@ -276,13 +440,38 @@ export default function CampoTab({
       return;
     }
 
+    if (campo === "montoenvio") {
+      // Monto de envío (DetSolicitud.MontoEnvio, 2 decimales): se guarda al instante y queda auditado; vacío = 0.
+      const nuevo = valor === null || valor === "" ? 0 : Number(valor);
+      if (!Number.isFinite(nuevo) || nuevo < 0) {
+        return setError(`Solicitud ${fila.nroSolicitud}, posición ${fila.posicion}: el monto de envío debe ser un número mayor o igual a 0.`);
+      }
+      const anteriorMonto = fila.montoEnvio ?? null;
+      if (Math.round(nuevo * 100) === Math.round((anteriorMonto ?? 0) * 100)) return;
+      actualizar(clave, { montoEnvio: nuevo });
+      try {
+        await actualizarLineaCierre({ ...base, campo: "montoenvio", valor: nuevo.toFixed(2) });
+        setMensaje(`Solicitud ${fila.nroSolicitud}, posición ${fila.posicion}: monto de envío modificado a ${nuevo.toFixed(2)}.`);
+      } catch (err) {
+        actualizar(clave, { montoEnvio: anteriorMonto });
+        setError(getHttpErrorMessage(err, "No se pudo guardar el monto de envío."));
+      }
+      return;
+    }
+
     const texto = String(valor ?? "");
     const anterior = campo === "observacion" ? fila.obs : campo === "nroguia" ? String(fila.nroGuia ?? "") : String(fila.serie ?? "");
     if (texto === anterior) return;
     const cambio = (v: string): Partial<FilaCampo> => (campo === "observacion" ? { obs: v } : campo === "nroguia" ? { nroGuia: v } : { serie: v });
     actualizar(clave, cambio(texto));
     try {
-      await actualizarLineaCampo({ ...base, campos: [campo], [campo === "nroguia" ? "nroGuia" : campo]: texto.trim() });
+      if (editaCierre && (campo === "serie" || campo === "observacion")) {
+        // Página Cierre: serie y observación se guardan en DetSolicitud sin importar el estado de la línea.
+        await actualizarLineaCierre({ ...base, campo, valor: texto.trim() });
+        setMensaje(`Solicitud ${fila.nroSolicitud}, posición ${fila.posicion}: ${campo === "serie" ? "serie" : "observación"} ${texto.trim() ? "modificada" : "eliminada"}.`);
+      } else {
+        await actualizarLineaCampo({ ...base, campos: [campo], [campo === "nroguia" ? "nroGuia" : campo]: texto.trim() });
+      }
       if (campo === "nroguia") {
         setMensaje(`Solicitud ${fila.nroSolicitud}, posición ${fila.posicion}: guía ${texto.trim() ? `modificada a ${texto.trim()}` : "eliminada"}.`);
       }
@@ -293,6 +482,7 @@ export default function CampoTab({
   };
 
   const ejecutar = async () => {
+    if (cambioEstado) return ejecutarCierre();
     setConfirmar(false);
     setGuardando(true);
     try {
@@ -354,6 +544,9 @@ export default function CampoTab({
       { dataField: "serie", caption: "Serie", width: 140, allowEditing: true },
       { dataField: "pedidoSap", caption: "Pedido SAP", width: 120, placeAfter: "serie" },
       { dataField: "nroGuia", caption: "Nro. guía", width: 130, allowEditing: true, placeAfter: "pedidoSap" },
+      ...(mostrarMontoEnvio
+        ? [{ dataField: "montoEnvio", caption: "Monto envío", dataType: "number" as const, width: 110, allowEditing: true, placeAfter: "nroGuia", format: { type: "fixedPoint" as const, precision: 2 } }]
+        : []),
       { dataField: "rutaImagen", caption: "Imagen", width: 80, alignment: "center", placeAfter: "nroGuia", allowFiltering: false, allowSorting: false, cellRender: botonImagen("Imagen") },
       { dataField: "imagenEnvio", caption: "Imagen envío", width: 100, alignment: "center", placeAfter: "nroGuia", allowFiltering: false, allowSorting: false, cellRender: botonImagen("Imagen de envío") },
       { dataField: "obs", caption: "Observación", width: 240, allowEditing: true, placeAfter: "imagenEnvio" },
@@ -365,7 +558,7 @@ export default function CampoTab({
       { dataField: "nomEstado", caption: "Est. actual", width: 120 },
       { dataField: "fechaCreacion", caption: "Fecha", width: 100, calculateCellValue: (r) => fechaCorta(r.fechaCreacion) },
     ],
-    [estadosCampo],
+    [estadosCampo, mostrarMontoEnvio],
   );
 
   // DataGridPro deja editable toda columna sin allowEditing:false: aquí se editan Estado, Observación, Serie, Nro. guía y Cant. Real.
@@ -373,12 +566,14 @@ export default function CampoTab({
   const columnas = useMemo<GridColumn<FilaCampo>[]>(
     () =>
       columnasBase
-        .filter((c) => !soloConsulta || (c.dataField !== "estadoNuevo" && c.dataField !== "cantConforme"))
+        .filter((c) => !soloConsulta || editaCierre || (c.dataField !== "estadoNuevo" && c.dataField !== "cantConforme"))
         .map((c) => ({
           ...c,
-          allowEditing: !soloConsulta && (c.dataField === "estadoNuevo" || c.dataField === "obs" || c.dataField === "serie" || c.dataField === "nroGuia" || c.dataField === "cantSap"),
+          allowEditing: editaCierre
+            ? c.dataField === "estadoNuevo" || c.dataField === "cantConforme" || c.dataField === "obs" || c.dataField === "serie" || c.dataField === "montoEnvio"
+            : !soloConsulta && (c.dataField === "estadoNuevo" || c.dataField === "obs" || c.dataField === "serie" || c.dataField === "nroGuia" || c.dataField === "cantSap"),
         })),
-    [columnasBase, soloConsulta],
+    [columnasBase, soloConsulta, editaCierre],
   );
 
   return (
@@ -414,9 +609,9 @@ export default function CampoTab({
         <button type="button" onClick={() => void buscar()} disabled={cargando} style={styles.secondary}>
           {cargando ? "Buscando…" : "Buscar"}
         </button>
-        {soloConsulta ? null : (
+        {soloConsulta && !editaCierre ? null : (
           <button type="button" onClick={pedirConfirmacion} disabled={guardando || cargando} style={styles.primary}>
-            {guardando ? "Grabando…" : "Grabar conformidad"}
+            {guardando ? "Grabando…" : editaCierre ? "Grabar estado" : "Grabar conformidad"}
           </button>
         )}
       </div>
@@ -424,11 +619,12 @@ export default function CampoTab({
       <div style={styles.toolbar}>
         <span style={styles.resumen}>
           {porEstados
-            ? `Son: ${filas.length} línea(s) en ${etapa ?? "estados " + estados}.`
+            ? `Son: ${filas.length} línea(s) en ${etapa ?? "estados " + estados}. Marcados: ${claves.size}.` +
+              (cambioEstado ? ` Sin estado elegido pasa a ${etiquetaDefecto}.` : "")
             : esReporte
-            ? `Son: ${filas.length} línea(s), de cualquier estado, según los filtros aplicados.`
+            ? `Son: ${filas.length} línea(s), de cualquier estado, según los filtros aplicados. Marcados: ${claves.size}.`
             : soloObservadas
-              ? `Son: ${filas.length} línea(s) observada(s) (estado 10).`
+              ? `Son: ${filas.length} línea(s) observada(s) (estado 10). Marcados: ${claves.size}.`
               : `Son: ${filas.length}. Marcados: ${claves.size}. Si cambia la cantidad conforme o elige OBSERVADA, indique la observación.`}
         </span>
       </div>
@@ -445,7 +641,7 @@ export default function CampoTab({
           loading={cargando}
           noDataText={porEstados ? `No hay líneas en ${etapa ?? "estos estados"}.` : esReporte ? "Active un filtro y pulse Buscar para ver el reporte." : soloObservadas ? "No hay líneas observadas." : "No hay líneas pendientes de conformidad en campo."}
           stateStoringKey={porEstados ? `logistica-cierre-${estados}-v1` : esReporte ? "logistica-reporte-v1" : soloObservadas ? "logistica-observadas-v1" : "logistica-campo-v4"}
-          selection={soloConsulta ? "none" : "multiple"}
+          selection="multiple"
           selectedKeys={Array.from(claves)}
           selectionDisabled={guardando}
           onSelectionChanged={(keys) => {
@@ -460,8 +656,10 @@ export default function CampoTab({
             );
           }}
           editing={{
-            allowUpdating: !soloConsulta,
+            allowUpdating: !soloConsulta || editaCierre,
             editOnClick: true,
+            // Línea rechazada (estado 6): no se puede cambiar su estado ni su cantidad conforme.
+            canEditCell: (row, field) => !(row.idEstado === ESTADO_RECHAZADO && (field === "estadoNuevo" || field === "cantConforme")),
             onCellChanged: ({ key, field, value }) => {
               if (field === "estadoNuevo") void guardarCelda(String(key), "estado", value === "" || value === null ? null : Number(value));
               else if (field === "cantConforme") actualizar(String(key), { cantConforme: Number(value) });
@@ -469,9 +667,13 @@ export default function CampoTab({
               else if (field === "serie") void guardarCelda(String(key), "serie", String(value ?? ""));
               else if (field === "cantSap") void guardarCelda(String(key), "cantsap", value === "" || value === null ? null : Number(value));
               else if (field === "nroGuia") void guardarCelda(String(key), "nroguia", String(value ?? ""));
+              else if (field === "montoEnvio") void guardarCelda(String(key), "montoenvio", value === "" || value === null || value === undefined ? null : Number(value));
             },
           }}
-          rowStyle={(f) => (esObservada(f) && claves.has(f.clave) ? { color: "#B45309", fontWeight: 600 } : undefined)}
+          rowStyle={(f) => ({
+            ...(FONDO_POR_ESTADO[f.idEstado] ? { background: FONDO_POR_ESTADO[f.idEstado] } : null),
+            ...(esObservada(f) && claves.has(f.clave) ? { color: "#B45309", fontWeight: 600 } : null),
+          })}
           showSearchPanel={false}
           allowExport
           exportFileName={porEstados ? `logistica_${(etapa ?? "cierre").replace(/\s+/g, "_").toLowerCase()}` : esReporte ? "logistica_reporte" : soloObservadas ? "logistica_observadas" : "logistica_campo"}
@@ -512,7 +714,11 @@ export default function CampoTab({
         title="Observación requerida"
         message={
           <>
-            <div>Indique el detalle de la observación para registrar la línea como OBSERVADA.</div>
+            <div>
+              {cambioEstado
+                ? "Indique el detalle de la observación (obligatoria para observar, dejar excedente o con cantidad conforme menor)."
+                : "Indique el detalle de la observación para registrar la línea como OBSERVADA."}
+            </div>
             <textarea
               autoFocus
               value={obsTexto}
@@ -537,7 +743,12 @@ export default function CampoTab({
       <ConfirmDialog
         open={confirmar}
         title="Confirmar"
-        message={`¿Desea dar CONFORMIDAD a los ${marcadas.length} registro(s) seleccionado(s)?`}
+        message={
+          cambioEstado
+            ? `¿Desea cambiar el estado de ${elegiblesCierre.length} registro(s)? Los que no tienen estado elegido pasan a ${etiquetaDefecto}.` +
+              (marcadas.length > elegiblesCierre.length ? ` (${marcadas.length - elegiblesCierre.length} marcado(s) se omiten por no estar en el estado de esta pestaña.)` : "")
+            : `¿Desea dar CONFORMIDAD a los ${marcadas.length} registro(s) seleccionado(s)?`
+        }
         confirmLabel="Grabar"
         onConfirm={() => void ejecutar()}
         onCancel={() => setConfirmar(false)}

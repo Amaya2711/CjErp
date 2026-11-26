@@ -133,6 +133,19 @@ public interface ILogisticaEquiposService
         string usuario,
         int? idEmpleadoCj,
         CancellationToken cancellationToken = default);
+
+    /// <summary>Actualiza DetSolicitud.Serie u Observacion de una linea de la pagina Cierre.</summary>
+    Task ActualizarLineaCierreAsync(
+        LogisticaCierreActualizarLineaDto request,
+        string usuario,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Cambia el estado de una linea de x Cruzar / x Cerrar / x Foliar (stock, kardex y linea de excedente si hay diferencia).</summary>
+    Task CambiarEstadoCierreAsync(
+        LogisticaCierreCambiarEstadoDto request,
+        string usuario,
+        int? idEmpleadoCj,
+        CancellationToken cancellationToken = default);
 }
 
 /// <summary>PDF y correo de la solicitud de equipos (Constante correo_logistica / correo_logistica_impl).</summary>

@@ -355,11 +355,6 @@ public class MantenimientoEmpleadosController : ControllerBase
             return NotFound(new { success = false, message = "No se encontro el empleado solicitado." });
         }
 
-        if (before.IdEstado != 9)
-        {
-            return BadRequest(new { success = false, message = "Solo se pueden rechazar empleados pendientes." });
-        }
-
         var usuario = GetCurrentUserName();
 
         try
@@ -367,7 +362,7 @@ public class MantenimientoEmpleadosController : ControllerBase
             await using var transaction = connection.BeginTransaction();
             try
             {
-                // Re-valida bajo bloqueo que siga pendiente (otro usuario pudo aprobarlo entre tanto).
+                // Valida bajo bloqueo contra la tabla (la ficha puede no traer IdEstado real) que siga pendiente.
                 var estadoActual = await connection.ExecuteScalarAsync<int?>(
                     new CommandDefinition(
                         "SELECT IdEstado FROM dbo.EmpleadoCj WITH (UPDLOCK, ROWLOCK) WHERE IdEmpleado = @IdEmpleado;",
@@ -379,7 +374,7 @@ public class MantenimientoEmpleadosController : ControllerBase
                 if (estadoActual != 9)
                 {
                     await transaction.RollbackAsync(cancellationToken);
-                    return Conflict(new { success = false, message = "El empleado ya no esta pendiente. Actualice la lista." });
+                    return BadRequest(new { success = false, message = "Solo se pueden rechazar empleados pendientes." });
                 }
 
                 // sp_EmpleadoCj_Actualizar solo cambia lo que llega distinto de NULL (COALESCE).

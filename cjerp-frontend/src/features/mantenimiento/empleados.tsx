@@ -524,6 +524,38 @@ export default function MantenimientoEmpleadosPage() {
     [activeTab, areas, clientes, empresas, items, organizationFilters, search, searchFields, ubicaciones]
   );
 
+  // Filtros en cascada: cada combo solo ofrece valores que existen en los registros
+  // que cumplen pestaña, búsqueda y los OTROS filtros de organización.
+  const organizationOptions = useMemo(() => {
+    const defs = [
+      { key: "empresa", idKey: "idEmpresaCj", options: empresas },
+      { key: "cliente", idKey: "idClienteCj", options: clientes },
+      { key: "area", idKey: "idAreaCj", options: areas },
+      { key: "ubicacion", idKey: "idUbicacionCj", options: ubicaciones },
+    ] as Array<{ key: keyof EmployeeOrganizationFilters; idKey: string; options: CrudLookupItem[] }>;
+
+    const result = {} as Record<keyof EmployeeOrganizationFilters, CrudLookupItem[]>;
+    for (const def of defs) {
+      const base = items.filter(
+        (item) =>
+          matchesEmpleadoTab(item, activeTab)
+          && matchesCrudToolbarSearch(item, search, searchFields)
+          && defs.every(
+            (other) =>
+              other.key === def.key
+              || matchesOrganizationFilter(item, organizationFilters[other.key], other.idKey, other.key, other.options)
+          )
+      );
+      const selected = organizationFilters[def.key];
+      result[def.key] = def.options.filter(
+        (option) =>
+          getLookupIdValue(option) === selected
+          || base.some((item) => matchesOrganizationFilter(item, getLookupIdValue(option), def.idKey, def.key, def.options))
+      );
+    }
+    return result;
+  }, [activeTab, areas, clientes, empresas, items, organizationFilters, search, searchFields, ubicaciones]);
+
   const tabCounts = useMemo(
     () => ({
       todos: items.filter((item) =>
@@ -1239,7 +1271,7 @@ export default function MantenimientoEmpleadosPage() {
                 style={styles.organizationFilterSelect}
               >
                 <option value="">Todos</option>
-                {filter.options.map((option) => (
+                {organizationOptions[filter.key].map((option) => (
                   <option key={`${filter.key}-${getLookupIdValue(option)}`} value={getLookupIdValue(option)}>
                     {option.label}
                   </option>

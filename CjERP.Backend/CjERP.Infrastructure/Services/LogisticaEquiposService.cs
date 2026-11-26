@@ -36,6 +36,8 @@ public class LogisticaEquiposService : ILogisticaEquiposService
     private const string CampoConsultarSp = "dbo.sp_Logistica_Campo_Consultar";
     private const string CampoGrabarSp = "dbo.sp_Logistica_Campo_Grabar";
     private const string CampoActualizarSp = "dbo.sp_Logistica_Campo_ActualizarLinea";
+    private const string CierreCambiarEstadoSp = "dbo.sp_Logistica_Cierre_CambiarEstado";
+    private const string CierreActualizarLineaSp = "dbo.sp_Logistica_Cierre_ActualizarLinea";
     private const string DashboardSp = "dbo.sp_Logistica_Dashboard_Resumen";
 
     private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
@@ -600,6 +602,53 @@ public class LogisticaEquiposService : ILogisticaEquiposService
         await EjecutarAsync(() => connection.ExecuteAsync(
             _sqlCommandFactory.Create(
                 CampoActualizarSp,
+                parametros,
+                CommandType.StoredProcedure,
+                cancellationToken,
+                commandTimeout: 180)));
+    }
+
+    public async Task ActualizarLineaCierreAsync(
+        LogisticaCierreActualizarLineaDto request,
+        string usuario,
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = _sqlCommandFactory.CreateConnection();
+        var parametros = new DynamicParameters();
+        parametros.Add("@NroSolicitud", request.NroSolicitud);
+        parametros.Add("@Posicion", request.Posicion);
+        parametros.Add("@Correlativo", NullIfWhiteSpace(request.Correlativo));
+        parametros.Add("@Campo", request.Campo);
+        parametros.Add("@Valor", NullIfWhiteSpace(request.Valor));
+        parametros.Add("@Usuario", usuario);
+        await EjecutarAsync(() => connection.ExecuteAsync(
+            _sqlCommandFactory.Create(
+                CierreActualizarLineaSp,
+                parametros,
+                CommandType.StoredProcedure,
+                cancellationToken,
+                commandTimeout: 60)));
+    }
+
+    public async Task CambiarEstadoCierreAsync(
+        LogisticaCierreCambiarEstadoDto request,
+        string usuario,
+        int? idEmpleadoCj,
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = _sqlCommandFactory.CreateConnection();
+        var parametros = new DynamicParameters();
+        parametros.Add("@NroSolicitud", request.NroSolicitud);
+        parametros.Add("@Posicion", request.Posicion);
+        parametros.Add("@Correlativo", NullIfWhiteSpace(request.Correlativo));
+        parametros.Add("@IdEstado", request.IdEstado);
+        parametros.Add("@Cantidad", request.Cantidad);
+        parametros.Add("@Observacion", NullIfWhiteSpace(request.Observacion));
+        parametros.Add("@Usuario", usuario);
+        parametros.Add("@IdEmpleadoCj", idEmpleadoCj);
+        await EjecutarAsync(() => connection.ExecuteAsync(
+            _sqlCommandFactory.Create(
+                CierreCambiarEstadoSp,
                 parametros,
                 CommandType.StoredProcedure,
                 cancellationToken,

@@ -411,6 +411,8 @@ export type CampoLinea = {
   rutaImagen?: string | null;
   imagenEnvio?: string | null;
   nroGuia?: string | null;
+  /** DetSolicitud.MontoEnvio (2 decimales). */
+  montoEnvio?: number | null;
   idEstado: number;
   nomEstado?: string | null;
   idCliente?: number | null;

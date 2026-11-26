@@ -150,7 +150,8 @@ export async function listarDetalleSolicitud(nroSolicitud: string) {
 // ---- x Campo ----
 
 export async function consultarCampo(consulta: CampoConsulta) {
-  return await httpClient.post<CampoLinea[]>("/logistica/equipos/campo/consultar", consulta);
+  // x Cerrar / x Foliar traen todas las líneas de las solicitudes con alguna línea en esos estados: puede tardar más de 30 s.
+  return await httpClient.post<CampoLinea[]>("/logistica/equipos/campo/consultar", consulta, { timeout: 120000 });
 }
 
 /** Resumen ejecutivo (dashboard) sobre todas las solicitudes, sin importar su estado; filtros opcionales por cliente-proyecto-site. */
@@ -176,6 +177,36 @@ export type CampoActualizar = {
 /** Guarda al instante lo editado en la grilla de x Campo (el estado ejecuta el flujo completo de conformidad). */
 export async function actualizarLineaCampo(item: CampoActualizar) {
   return await httpClient.post<boolean>("/logistica/equipos/campo/actualizar", item, { timeout: 120000 });
+}
+
+export type CierreActualizarLinea = {
+  nroSolicitud: string;
+  posicion: string;
+  correlativo?: string | null;
+  campo: "serie" | "observacion" | "montoenvio";
+  /** Vacío = limpiar el campo (montoenvio: 0). El monto va con punto decimal, p. ej. "12.50". */
+  valor: string;
+};
+
+/** Actualiza DetSolicitud.Serie u Observacion de UNA línea de la página Cierre (cualquier estado). */
+export async function actualizarLineaCierre(item: CierreActualizarLinea) {
+  return await httpClient.post<boolean>("/logistica/equipos/cierre/actualizar-linea", item, { timeout: 60000 });
+}
+
+export type CierreCambiarEstado = {
+  nroSolicitud: string;
+  posicion: string;
+  correlativo?: string | null;
+  /** Estado elegido: x Cruzar 21/17/10; x Cerrar 16/20/17/10; x Foliar 20/10. */
+  idEstado: number;
+  /** Cantidad conforme (0..cantidad de la línea); si es menor, la diferencia pasa a una línea nueva en estado 17 (excedente). */
+  cantidad?: number | null;
+  observacion?: string;
+};
+
+/** Cambia el estado de UNA línea de x Cruzar / x Cerrar / x Foliar (mueve stock, escribe kardex y movimientos). */
+export async function cambiarEstadoCierre(item: CierreCambiarEstado) {
+  return await httpClient.post<boolean>("/logistica/equipos/cierre/cambiar-estado", item, { timeout: 120000 });
 }
 
 export async function grabarCampo(items: CampoItem[]) {

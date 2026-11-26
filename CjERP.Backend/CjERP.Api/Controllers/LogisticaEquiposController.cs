@@ -226,6 +226,22 @@ public class LogisticaEquiposController : ControllerBase
             return true;
         }, "actualizar la linea de campo");
 
+    [HttpPost("cierre/actualizar-linea")]
+    public Task<IActionResult> ActualizarLineaCierre([FromBody] LogisticaCierreActualizarLineaDto request, CancellationToken cancellationToken = default)
+        => Ejecutar(async () =>
+        {
+            await _service.ActualizarLineaCierreAsync(request, ResolveUsuario(), cancellationToken);
+            return true;
+        }, "actualizar la linea");
+
+    [HttpPost("cierre/cambiar-estado")]
+    public Task<IActionResult> CambiarEstadoCierre([FromBody] LogisticaCierreCambiarEstadoDto request, CancellationToken cancellationToken = default)
+        => Ejecutar(async () =>
+        {
+            await _service.CambiarEstadoCierreAsync(request, ResolveUsuario(), ResolveIdEmpleadoCj(), cancellationToken);
+            return true;
+        }, "cambiar el estado de la linea");
+
     /// <summary>Los errores de negocio de los SP llegan como InvalidOperationException y se devuelven como 400 con su mensaje.</summary>
     private async Task<IActionResult> Ejecutar<T>(Func<Task<T>> accion, string descripcion)
     {
