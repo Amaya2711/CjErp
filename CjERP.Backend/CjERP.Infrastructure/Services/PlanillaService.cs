@@ -782,6 +782,13 @@ namespace CjERP.Infrastructure.Services
                     };
                 }
 
+                await RegistrarAuditoriaCambioEstadoAsync(
+                    resultado.Detalle,
+                    codEstadoAplicado,
+                    usuarioLimpio,
+                    idRegularizar > 0,
+                    observacion);
+
                 return resultado;
             }
             catch (Exception ex)
@@ -791,6 +798,63 @@ namespace CjERP.Infrastructure.Services
                     "[PlanillaService] Error ejecutando aprobacion masiva para {Registros} registro(s).",
                     registrosNormalizados.Count);
                 throw;
+            }
+        }
+
+        /// <summary>
+        /// Deja en AuditoriaCambios cada cambio de estado hecho por aprobar / re-aprobar / observar / rechazar
+        /// (una fila por recibo procesado, con estado anterior y nuevo) para validarlos desde el monitor.
+        /// El historial propio del SP en MovEstadosPagos no se toca; la auditoría nunca revierte la operación.
+        /// </summary>
+        private async Task RegistrarAuditoriaCambioEstadoAsync(
+            IEnumerable<AprobacionResultadoDto> detalle,
+            int codEstadoSolicitado,
+            string usuario,
+            bool regularizar,
+            string? observacion)
+        {
+            try
+            {
+                var accion = codEstadoSolicitado switch
+                {
+                    1 => "Aprobación (Hormiga)",
+                    2 => "Observación",
+                    3 => "Rechazo",
+                    6 => "Re-aprobación",
+                    10 => "Primera aprobación",
+                    _ => $"Acción {codEstadoSolicitado}"
+                };
+                var motivo = string.IsNullOrWhiteSpace(observacion) ? string.Empty : $" Observación: {observacion.Trim()}";
+
+                var cambios = detalle
+                    .Where(item => item.Exito)
+                    .Select(item => new AuditoriaCambioDto
+                    {
+                        Modulo = "Planilla",
+                        Entidad = "Planilla",
+                        IdRegistro = item.Correlativo.ToString(CultureInfo.InvariantCulture),
+                        Accion = "UPDATE",
+                        Seccion = "Cambio de estado",
+                        Campo = "Estado",
+                        ValorAnterior = item.EstadoAnterior?.ToString(CultureInfo.InvariantCulture),
+                        ValorNuevo = item.EstadoAplicado.ToString(CultureInfo.InvariantCulture),
+                        UsuarioAccion = usuario,
+                        Observacion =
+                            $"{accion} desde la web (IdSite {item.IdSite})"
+                            + (regularizar ? ", con regularización" : string.Empty)
+                            + (item.RequiereSegundaAprobacion ? ", enviado a segunda aprobación" : string.Empty)
+                            + $".{motivo}"
+                    })
+                    .ToList();
+
+                if (cambios.Count > 0)
+                {
+                    await _auditoriaCambiosService.RegistrarLoteAsync(cambios, CancellationToken.None);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "No se pudo registrar la auditoría del cambio de estado (aprobación masiva).");
             }
         }
 

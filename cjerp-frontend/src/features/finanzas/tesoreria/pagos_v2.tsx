@@ -3510,11 +3510,11 @@ export default function PagosV2Page() {
       });
       return;
     }
-    // En % Ficticio conviven Re-aprobar (6) y Hormiga (10): re-aprobar/regularizar solo aplica a los de estado 6.
+    // En % Ficticio conviven Re-aprobar (6) y Hormiga (10): Regularizar solo aplica a los de estado 6.
     const filasReaprobables =
       activeTab === "ficticio" ? selectedRows.filter((row) => row.estadoCodigo === "6") : selectedRows;
-    if ((label === "Regularizar" || label === "Re-aprobar") && filasReaprobables.length === 0) {
-      setMessage("Seleccione al menos un registro de Re-aprobar (estado 6): los de Hormiga no se re-aprueban.");
+    if (label === "Regularizar" && filasReaprobables.length === 0) {
+      setMessage("Regularizar solo aplica a registros de Re-aprobar (estado 6): los de Hormiga no se regularizan.");
       return;
     }
     if (label === "Regularizar") {
@@ -3523,12 +3523,12 @@ export default function PagosV2Page() {
     }
     if (label === "Re-aprobar") {
       setAprobarConfirm({
-        rowsCount: filasReaprobables.length,
+        rowsCount: selectedRows.length,
         // El SP interpreta 6 como segunda aprobación y realiza la
         // transición interna hacia el estado final 1.
         codEstado: 6,
         titulo: "Re-aprobar",
-        mensaje: `¿Desea re-aprobar ${filasReaprobables.length} registro(s) seleccionado(s)?`,
+        mensaje: `¿Desea re-aprobar ${selectedRows.length} registro(s) seleccionado(s)?`,
       });
       return;
     }
@@ -3731,35 +3731,60 @@ export default function PagosV2Page() {
     }
 
     // El SP (script Finanzas/15) admite primera aprobación desde estados 0, 2 y 7.
-    // En % Ficticio (estados 6 y 10) solo se re-aprueba/regulariza lo de estado 6, igual que en Re-aprobar.
-    const filasAProcesar = activeTab === "ficticio" ? selectedRows.filter((row) => row.estadoCodigo === "6") : selectedRows;
+    // En % Ficticio conviven estados 6 (Re-aprobar) y 10 (Hormiga): cada grupo se envía con su propio CodEstado,
+    // el mismo que usa su bandeja (6 = re-aprobación; 1 = aprobación final de Hormiga). Regularizar solo existe en
+    // Re-aprobar, por lo que solo procesa los de estado 6.
+    const grupos: Array<{ codEstado: number; filas: PagoRow[] }> =
+      activeTab === "ficticio"
+        ? [
+            { codEstado: 6, filas: selectedRows.filter((row) => row.estadoCodigo === "6") },
+            ...(idRegularizar === 0 ? [{ codEstado: 1, filas: selectedRows.filter((row) => row.estadoCodigo === "10") }] : []),
+          ].filter((grupo) => grupo.filas.length > 0)
+        : [{ codEstado, filas: selectedRows }];
+    const filasAProcesar = grupos.flatMap((grupo) => grupo.filas);
     if (filasAProcesar.length === 0) {
-      setMessage("Seleccione al menos un registro de Re-aprobar (estado 6).");
+      setMessage("Seleccione al menos un registro de Re-aprobar (estado 6) o Hormiga (estado 10).");
       return;
     }
 
     try {
       // Envío en bloques de 40: cada bloque es una transacción corta en el SP (sin bloqueos largos sobre Planilla).
-      const resultado = await aprobarPlanillaMasivaPorBloques(
-        {
-          codEstado,
-          observacion: null,
-          idRegularizar: Math.trunc(idRegularizar),
-          registros: filasAProcesar.map((row) => ({
-            correlativo: Math.trunc(Number(row.correlativo)),
-            idSite: row.siteId,
-            tipoMoneda: Math.trunc(Number(row.tipoMoneda ?? 0)),
-          })),
-        },
-        {
-          timeoutMs: 120000,
-          onProgreso: (actual, total) => {
-            if (total > 1) setMessage(`Procesando bloque ${actual} de ${total}…`);
+      let detalle: AprobacionResultadoDto[] = [];
+      const resumen = { procesados: 0, enviadosSegundaAprobacion: 0, noProcesados: 0 };
+      let errorBloque: unknown = null;
+      let bloquesCompletados = 0;
+      let bloquesTotales = 0;
+      for (const grupo of grupos) {
+        const resultado = await aprobarPlanillaMasivaPorBloques(
+          {
+            codEstado: grupo.codEstado,
+            observacion: null,
+            idRegularizar: Math.trunc(idRegularizar),
+            registros: grupo.filas.map((row) => ({
+              correlativo: Math.trunc(Number(row.correlativo)),
+              idSite: row.siteId,
+              tipoMoneda: Math.trunc(Number(row.tipoMoneda ?? 0)),
+            })),
           },
+          {
+            timeoutMs: 120000,
+            onProgreso: (actual, total) => {
+              if (total > 1) setMessage(`Procesando bloque ${actual} de ${total}…`);
+            },
+          }
+        );
+        detalle = detalle.concat(resultado.detalle);
+        resumen.procesados += resultado.resumen.procesados;
+        resumen.enviadosSegundaAprobacion += resultado.resumen.enviadosSegundaAprobacion;
+        resumen.noProcesados += resultado.resumen.noProcesados;
+        bloquesCompletados += resultado.bloquesCompletados;
+        bloquesTotales += resultado.bloquesTotales;
+        if (resultado.error) {
+          errorBloque = resultado.error;
+          break;
         }
-      );
+      }
 
-      const { detalle, resumen, error: errorBloque } = resultado;
       if (errorBloque && detalle.length === 0) {
         setMessage(getHttpErrorMessage(errorBloque, "No se pudo completar la aprobación."));
         return;
@@ -3778,7 +3803,7 @@ export default function PagosV2Page() {
 
       if (errorBloque) {
         mensajes.push(
-          `Se detuvo en el bloque ${resultado.bloquesCompletados + 1} de ${resultado.bloquesTotales}: ${getHttpErrorMessage(errorBloque, "error de servidor")}. Los bloques anteriores sí quedaron aplicados.`
+          `Se detuvo en el bloque ${bloquesCompletados + 1} de ${bloquesTotales}: ${getHttpErrorMessage(errorBloque, "error de servidor")}. Los bloques anteriores sí quedaron aplicados.`
         );
       }
 
