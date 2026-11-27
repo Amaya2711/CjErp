@@ -1,0 +1,9 @@
+{
+  "name": "cjerp-mobile",
+  "private": true,
+  "workspaces": ["shared", "logistica"],
+  "scripts": {
+    "dev:logistica": "npm run dev -w logistica",
+    "build:logistica": "npm run build -w logistica"
+  }
+}

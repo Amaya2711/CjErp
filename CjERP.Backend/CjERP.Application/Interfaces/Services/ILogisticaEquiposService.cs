@@ -146,6 +146,31 @@ public interface ILogisticaEquiposService
         string usuario,
         int? idEmpleadoCj,
         CancellationToken cancellationToken = default);
+
+    // ---- x Despachar ---- (script Database/Logistica/25; reglas en docs/mobile/despachos-reglas-legado.md)
+    Task<IEnumerable<LogisticaDespachoLineaDto>> ConsultarDespachoAsync(
+        LogisticaDespachoConsultaDto consulta,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Series libres de un material (equipos 40) para asignar al despachar.</summary>
+    Task<IEnumerable<LogisticaDespachoSerieDto>> ListarSeriesDespachoAsync(
+        string codPap,
+        string? buscar,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Despacha lineas (estado 3/4 -> 5): stock Despachado -> Enviado; la diferencia de cantidad vuelve a Disponible.</summary>
+    Task<LogisticaDespachoGrabarResultDto> GrabarDespachoAsync(
+        LogisticaDespachoGrabarDto request,
+        string usuario,
+        int? idEmpleadoCj,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Rechaza lineas en despacho (3/4 -> 6) con motivo obligatorio: stock Despachado -> Disponible y serie liberada.</summary>
+    Task<LogisticaDespachoRechazarResultDto> RechazarDespachoAsync(
+        LogisticaDespachoRechazarDto request,
+        string usuario,
+        int? idEmpleadoCj,
+        CancellationToken cancellationToken = default);
 }
 
 /// <summary>PDF y correo de la solicitud de equipos (Constante correo_logistica / correo_logistica_impl).</summary>

@@ -1,4 +1,4 @@
-﻿namespace CjERP.Application.DTOs.Auth
+namespace CjERP.Application.DTOs.Auth
 {
     public class LoginResponseDto
     {
@@ -18,6 +18,8 @@
         public int? IdleTimeoutMinutes { get; set; }
         public int? IdPerfil { get; set; }
         public int? IdRol { get; set; }
+        /// <summary>Aplicacion de la sesion (WEB o MOB_xxx); viaja en el JWT como claim App.</summary>
+        public string? App { get; set; }
 
     }
 }

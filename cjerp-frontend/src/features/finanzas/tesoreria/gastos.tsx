@@ -3708,6 +3708,13 @@ const [busqueda, setBusqueda] = useState("");
   const cantidadRegistrosFiltrados = gastosFiltradosBase.length;
   const gastosFiltrados = gastosFiltradosBase;
   const gastosFiltradosDiferidos = useDeferredValue(gastosFiltrados);
+  // Filas que realmente muestra el grid (tras los filtros de columna); base del pie y de la exportación.
+  const [filasVisiblesGrid, setFilasVisiblesGrid] = useState<GastoGridRow[] | null>(null);
+  const handleFilasVisiblesGrid = React.useCallback((rows: GastoGridRow[]) => setFilasVisiblesGrid(rows), []);
+  const gastosVisiblesGrid = useMemo(
+    () => (filasVisiblesGrid ? filasVisiblesGrid.map((fila) => fila.gasto) : gastosFiltrados),
+    [filasVisiblesGrid, gastosFiltrados]
+  );
   const handleFiltroOperativoChange = React.useCallback(
     (val: FiltroOperativoValue) => {
       setForm((prev) =>
@@ -4169,7 +4176,7 @@ const [busqueda, setBusqueda] = useState("");
               const XLSX = await import("xlsx");
               const headers = columnasGridGastos.filter(c => c.key !== "acciones").map(c => c.label);
               const keys = columnasGridGastos.filter(c => c.key !== "acciones").map(c => c.key);
-              const rows = gastosFiltrados.map(gasto =>
+              const rows = gastosVisiblesGrid.map(gasto =>
                 keys.map(key => {
                   switch (key) {
                     case "cliente":
@@ -4816,6 +4823,7 @@ const [busqueda, setBusqueda] = useState("");
           selection={vistaGastos === "consulta" ? "multiple" : "none"}
           selectedKeys={vistaGastos === "consulta" ? selectedRowKeys : undefined}
           onSelectionChanged={(keys) => setSelectedRowKeys(keys)}
+          onVisibleRowsChange={handleFilasVisiblesGrid}
           onRowClick={(row) => {
             setSelectedRowKey(row.rowKey);
             if (rechazoError) {
@@ -4835,14 +4843,14 @@ const [busqueda, setBusqueda] = useState("");
           alignItems: "center"
         }}>
           <span>
-            Registros encontrados: {gastosFiltrados.length}
+            Registros encontrados: {gastosVisiblesGrid.length}
             {vistaGastos === "consulta" && selectedRowKeys.length > 0 ? ` | Seleccionados: ${selectedRowKeys.length}` : ""}
           </span>
           <span>
             {(() => {
               // Agrupar y sumar montos por moneda
               const resumen = new Map();
-              gastosFiltrados.forEach(gasto => {
+              gastosVisiblesGrid.forEach(gasto => {
                 const moneda = gasto.monedaLabel || gasto.moneda || "-";
                 const monto = Number(gasto.monto) || 0;
                 if (!resumen.has(moneda)) resumen.set(moneda, 0);

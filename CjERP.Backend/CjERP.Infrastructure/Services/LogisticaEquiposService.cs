@@ -39,6 +39,10 @@ public class LogisticaEquiposService : ILogisticaEquiposService
     private const string CierreCambiarEstadoSp = "dbo.sp_Logistica_Cierre_CambiarEstado";
     private const string CierreActualizarLineaSp = "dbo.sp_Logistica_Cierre_ActualizarLinea";
     private const string DashboardSp = "dbo.sp_Logistica_Dashboard_Resumen";
+    private const string DespachoConsultarSp = "dbo.sp_Logistica_Despacho_Consultar";
+    private const string DespachoSeriesSp = "dbo.sp_Logistica_Despacho_Series";
+    private const string DespachoGrabarSp = "dbo.sp_Logistica_Despacho_Grabar";
+    private const string DespachoRechazarSp = "dbo.sp_Logistica_Despacho_Rechazar";
 
     private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
 
@@ -653,6 +657,100 @@ public class LogisticaEquiposService : ILogisticaEquiposService
                 CommandType.StoredProcedure,
                 cancellationToken,
                 commandTimeout: 180)));
+    }
+
+    // ---- x Despachar ----
+
+    public async Task<IEnumerable<LogisticaDespachoLineaDto>> ConsultarDespachoAsync(
+        LogisticaDespachoConsultaDto consulta,
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = _sqlCommandFactory.CreateConnection();
+        var parametros = new DynamicParameters();
+        parametros.Add("@Solicitudes", NullIfWhiteSpace(consulta.Solicitudes));
+        parametros.Add("@FechaIni", consulta.FechaIni?.Date);
+        parametros.Add("@FechaFin", consulta.FechaFin?.Date);
+        parametros.Add("@IdCliente", consulta.IdCliente);
+        parametros.Add("@IdProyecto", consulta.IdProyecto);
+        parametros.Add("@IdSite", NullIfWhiteSpace(consulta.IdSite));
+        parametros.Add("@CorreSite", consulta.CorreSite);
+        var origen = NullIfWhiteSpace(consulta.Origen)?.ToUpperInvariant();
+        if (origen is not null && origen is not ("NUEVO" or "ANTIGUO"))
+            throw new InvalidOperationException("El origen debe ser NUEVO o ANTIGUO.");
+        parametros.Add("@Origen", origen);
+        return await EjecutarAsync(() => connection.QueryAsync<LogisticaDespachoLineaDto>(
+            _sqlCommandFactory.Create(
+                DespachoConsultarSp,
+                parametros,
+                CommandType.StoredProcedure,
+                cancellationToken,
+                commandTimeout: 120)));
+    }
+
+    public async Task<IEnumerable<LogisticaDespachoSerieDto>> ListarSeriesDespachoAsync(
+        string codPap,
+        string? buscar,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(codPap))
+            throw new InvalidOperationException("Debe indicar el material.");
+
+        await using var connection = _sqlCommandFactory.CreateConnection();
+        var parametros = new DynamicParameters();
+        parametros.Add("@CodPap", codPap.Trim());
+        parametros.Add("@Buscar", NullIfWhiteSpace(buscar));
+        return await EjecutarAsync(() => connection.QueryAsync<LogisticaDespachoSerieDto>(
+            _sqlCommandFactory.Create(
+                DespachoSeriesSp,
+                parametros,
+                CommandType.StoredProcedure,
+                cancellationToken,
+                commandTimeout: 60)));
+    }
+
+    public async Task<LogisticaDespachoGrabarResultDto> GrabarDespachoAsync(
+        LogisticaDespachoGrabarDto request,
+        string usuario,
+        int? idEmpleadoCj,
+        CancellationToken cancellationToken = default)
+    {
+        var parametros = new DynamicParameters();
+        parametros.Add("@Items", JsonSerializer.Serialize(request.Items, JsonOptions), DbType.String);
+        parametros.Add("@Usuario", usuario, DbType.String);
+        parametros.Add("@IdEmpleadoCj", idEmpleadoCj, DbType.Int32);
+        parametros.Add("@IdResponsable", idEmpleadoCj, DbType.Int32);
+        parametros.Add("@Procesadas", dbType: DbType.Int32, direction: ParameterDirection.Output);
+        parametros.Add("@ConDiferencia", dbType: DbType.Int32, direction: ParameterDirection.Output);
+
+        await using var connection = _sqlCommandFactory.CreateConnection();
+        await EjecutarAsync(() => connection.ExecuteAsync(
+            _sqlCommandFactory.Create(DespachoGrabarSp, parametros, CommandType.StoredProcedure, cancellationToken, commandTimeout: 180)));
+
+        return new LogisticaDespachoGrabarResultDto
+        {
+            Procesadas = parametros.Get<int?>("@Procesadas") ?? 0,
+            ConDiferencia = parametros.Get<int?>("@ConDiferencia") ?? 0,
+        };
+    }
+
+    public async Task<LogisticaDespachoRechazarResultDto> RechazarDespachoAsync(
+        LogisticaDespachoRechazarDto request,
+        string usuario,
+        int? idEmpleadoCj,
+        CancellationToken cancellationToken = default)
+    {
+        var parametros = new DynamicParameters();
+        parametros.Add("@Items", JsonSerializer.Serialize(request.Items, JsonOptions), DbType.String);
+        parametros.Add("@Observacion", NullIfWhiteSpace(request.Observacion), DbType.String);
+        parametros.Add("@Usuario", usuario, DbType.String);
+        parametros.Add("@IdEmpleadoCj", idEmpleadoCj, DbType.Int32);
+        parametros.Add("@Procesadas", dbType: DbType.Int32, direction: ParameterDirection.Output);
+
+        await using var connection = _sqlCommandFactory.CreateConnection();
+        await EjecutarAsync(() => connection.ExecuteAsync(
+            _sqlCommandFactory.Create(DespachoRechazarSp, parametros, CommandType.StoredProcedure, cancellationToken, commandTimeout: 180)));
+
+        return new LogisticaDespachoRechazarResultDto { Procesadas = parametros.Get<int?>("@Procesadas") ?? 0 };
     }
 
     /// <summary>Los errores de negocio de los SP (THROW 51xxx) se informan al usuario como InvalidOperationException.</summary>

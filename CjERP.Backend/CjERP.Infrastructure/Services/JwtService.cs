@@ -37,7 +37,8 @@ namespace CjERP.Infrastructure.Services
                 new Claim("Cuadrilla", Value("Cuadrilla")),
                 new Claim("IdPerfil", Value("IdPerfil")),
                 new Claim("IdRol", Value("IdRol")),
-                new Claim("SessionId", Value("SessionId"))
+                new Claim("SessionId", Value("SessionId")),
+                new Claim("App", string.IsNullOrWhiteSpace(Value("App")) ? "WEB" : Value("App"))
             };
 
             return WriteToken(claims);
@@ -58,7 +59,8 @@ namespace CjERP.Infrastructure.Services
                 new Claim("Cuadrilla", usuario.Cuadrilla?.ToString() ?? string.Empty),
                 new Claim("IdPerfil", usuario.IdPerfil?.ToString() ?? string.Empty),
                 new Claim("IdRol", usuario.IdRol?.ToString() ?? string.Empty),
-                new Claim("SessionId", sessionId ?? string.Empty)
+                new Claim("SessionId", sessionId ?? string.Empty),
+                new Claim("App", string.IsNullOrWhiteSpace(usuario.App) ? "WEB" : usuario.App)
             };
 
             return WriteToken(claims);

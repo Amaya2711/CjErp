@@ -58,4 +58,21 @@ public sealed class JwtServiceRenewTokenTests
         var handler = new JwtSecurityTokenHandler();
         Assert.True(handler.ReadJwtToken(renovado).ValidTo >= handler.ReadJwtToken(original).ValidTo);
     }
+
+    [Fact]
+    public void GenerateToken_sin_app_es_WEB_y_con_app_movil_la_conserva_al_renovar()
+    {
+        var service = CreateService();
+
+        var web = service.ValidateToken(service.GenerateToken(new LoginResponseDto { IdUsuario = "U1", IdRol = 7 }, "s1"));
+        Assert.Equal("WEB", web!.FindFirst("App")?.Value);
+
+        var movil = service.ValidateToken(service.GenerateToken(
+            new LoginResponseDto { IdUsuario = "U1", IdRol = 9, App = "MOB_LOGISTICA" }, "s2"));
+        Assert.Equal("MOB_LOGISTICA", movil!.FindFirst("App")?.Value);
+        Assert.Equal("9", movil.FindFirst("IdRol")?.Value);
+
+        var renovado = service.ValidateToken(service.RenewToken(movil));
+        Assert.Equal("MOB_LOGISTICA", renovado!.FindFirst("App")?.Value);
+    }
 }

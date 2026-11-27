@@ -1,4 +1,4 @@
-﻿using System.Data;
+using System.Data;
 using CjERP.Application.DTOs.Seguridad;
 using CjERP.Application.Interfaces.Services;
 using Dapper;
@@ -72,5 +72,29 @@ public class SegRolMenuPermisoService : ISegRolMenuPermisoService
             },
             commandType: CommandType.StoredProcedure
         );
+    }
+
+    public async Task<AccesoUsuarioDto> ObtenerAccesoUsuarioAsync(string idUsuario, string app)
+    {
+        using var connection = CreateConnection();
+
+        var activo = await connection.ExecuteScalarAsync<int?>(
+            "SELECT TOP (1) IdEstado FROM dbo.Usuario WHERE IdUsuario = @IdUsuario",
+            new { IdUsuario = idUsuario?.Trim() });
+
+        var roles = await connection.QueryAsync<int>(
+            """
+            SELECT DISTINCT f.IdRol
+            FROM dbo.SegUsuarioPerfilRol e
+            INNER JOIN dbo.SegPerfilRol f ON f.IdPerfilRol = e.IdPerfilRol
+            WHERE e.IdUsuario = @IdUsuario
+              AND ISNULL(e.EsActivo, 1) = 1
+              AND ISNULL(f.EsActivo, 1) = 1
+              AND EXISTS (SELECT 1 FROM dbo.SegRolApp ra
+                          WHERE ra.IdRol = f.IdRol AND ra.CodigoApp = @App AND ISNULL(ra.EsActivo, 1) = 1)
+            """,
+            new { IdUsuario = idUsuario?.Trim(), App = app?.Trim().ToUpperInvariant() });
+
+        return new AccesoUsuarioDto { Activo = activo == 1, Roles = roles.ToList() };
     }
 }

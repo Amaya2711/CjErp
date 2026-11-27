@@ -1,0 +1,77 @@
+:root {
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  color: #1c2530;
+  background: #eef2f6;
+}
+* { box-sizing: border-box; }
+body { margin: 0; }
+.screen {
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  padding: max(16px, env(safe-area-inset-top)) 16px max(16px, env(safe-area-inset-bottom));
+}
+.card {
+  width: 100%;
+  max-width: 400px;
+  background: #fff;
+  border-radius: 14px;
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
+}
+h1 { margin: 0; font-size: 1.4rem; color: #0f3d68; }
+label { display: flex; flex-direction: column; gap: 6px; font-size: 0.9rem; }
+input {
+  font-size: 1rem; /* 16px evita el zoom automático en iOS */
+  padding: 12px;
+  border: 1px solid #b8c2cc;
+  border-radius: 8px;
+}
+button {
+  font-size: 1rem;
+  padding: 13px;
+  border: 0;
+  border-radius: 8px;
+  background: #0f3d68;
+  color: #fff;
+}
+button:disabled { opacity: 0.55; }
+.error { color: #b3261e; margin: 0; }
+
+/* Despachos */
+.lista { min-height: 100dvh; padding: max(12px, env(safe-area-inset-top)) 12px max(24px, env(safe-area-inset-bottom)); display: flex; flex-direction: column; gap: 12px; max-width: 560px; margin: 0 auto; }
+.barra { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.barra small { color: #5b6773; }
+.buscar { display: flex; gap: 8px; }
+.buscar input { flex: 1; min-width: 0; }
+.card-grupo { background: #fff; border-radius: 12px; box-shadow: 0 1px 8px rgba(0,0,0,.08); overflow: hidden; }
+.grupo-cab { width: 100%; display: flex; justify-content: space-between; align-items: center; gap: 8px; background: #fff; color: #1c2530; text-align: left; border-radius: 0; padding: 14px; }
+.grupo-cab small { display: block; color: #5b6773; font-weight: 400; }
+.chip { background: #e3edf7; color: #0f3d68; border-radius: 999px; padding: 3px 10px; font-size: .78rem; white-space: nowrap; }
+.linea { border-top: 1px solid #e3e8ee; padding: 14px; display: flex; flex-direction: column; gap: 10px; }
+.linea-cab { display: flex; justify-content: space-between; gap: 8px; align-items: flex-start; }
+.linea small { color: #5b6773; }
+.foto { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.acciones { display: flex; gap: 8px; }
+.acciones button { flex: 1; }
+button.sec { background: #e3edf7; color: #0f3d68; }
+button.peligro { background: #b3261e; }
+.ok { color: #1b6e3c; margin: 0; }
+.aviso { margin: 0; background: #fff4e0; color: #7a4b00; border-radius: 8px; padding: 8px 10px; font-size: .85rem; }
+select { font-size: 1rem; padding: 12px; border: 1px solid #b8c2cc; border-radius: 8px; background: #fff; }
+
+/* Login */
+.login { width: 100%; max-width: 400px; display: flex; flex-direction: column; gap: 18px; }
+.marca { text-align: center; }
+.marca h1 { margin: 8px 0 2px; }
+.marca p { margin: 0; color: #5b6773; }
+.logo { display: inline-grid; place-items: center; width: 64px; height: 64px; border-radius: 16px; background: #0f3d68; color: #fff; font-weight: 700; font-size: 1.5rem; letter-spacing: 1px; }
+.clave { display: flex; gap: 8px; }
+.clave input { flex: 1; min-width: 0; }
+.clave .ver { padding: 0 14px; }
+.campo-error { color: #b3261e; }
+input[aria-invalid="true"] { border-color: #b3261e; }
+.entorno { text-align: center; color: #8a949e; }

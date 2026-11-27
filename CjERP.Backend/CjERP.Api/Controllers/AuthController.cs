@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using CjERP.Api.Configuration;
 using CjERP.Application.DTOs.Auth;
+using CjERP.Application.Exceptions;
 using CjERP.Application.Interfaces.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -46,7 +47,16 @@ namespace CjERP.Api.Controllers
             if (string.IsNullOrWhiteSpace(request.Clave))
                 return BadRequest("Debe ingresar la clave.");
 
-            var usuario = await _authService.LoginAsync(request, cancellationToken);
+            LoginResponseDto? usuario;
+            try
+            {
+                usuario = await _authService.LoginAsync(request, cancellationToken);
+            }
+            catch (AccesoAplicacionException ex)
+            {
+                // Credenciales correctas pero sin acceso a esa aplicacion: aun NO se creo la sesion.
+                return StatusCode(StatusCodes.Status403Forbidden, new { success = false, message = ex.Message });
+            }
 
             if (usuario == null)
                 return Unauthorized("Usuario o contraseña incorrectos.");
